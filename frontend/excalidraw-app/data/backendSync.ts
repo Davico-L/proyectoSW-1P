@@ -1,6 +1,7 @@
-import { clearAppStateForLocalStorage } from "@excalidraw/excalidraw/appState";
-import { getNonDeletedElements } from "@excalidraw/element";
 import { debounce } from "@excalidraw/common";
+import { getNonDeletedElements } from "@excalidraw/element";
+import { clearAppStateForLocalStorage } from "@excalidraw/excalidraw/appState";
+
 import type { ExcalidrawElement } from "@excalidraw/element/types";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 
@@ -9,6 +10,7 @@ export const BACKEND_URL =
 
 export const ACTIVE_DIAGRAM_KEY = "active_diagram_id";
 export const ACTIVE_SESSION_KEY = "active_session_id";
+export const ACTIVE_USERNAME_KEY = "active_session_username";
 
 export interface BackendDiagram {
   id: string;
@@ -25,12 +27,12 @@ export interface BackendDiagram {
 
 /**
  * Obtiene el ID del diagrama activo actual.
- * Prioriza el parámetro en la URL (?id=... o ?diagramId=...) y luego el almacenamiento local.
+ * Prioriza el parámetro en la URL (?diagramId=...) y luego el almacenamiento local.
  */
 export const getActiveDiagramId = (): string | null => {
   try {
     const searchParams = new URLSearchParams(window.location.search);
-    const urlId = searchParams.get("id") || searchParams.get("diagramId");
+    const urlId = searchParams.get("diagramId");
     if (urlId) {
       return urlId;
     }
@@ -48,17 +50,21 @@ export const setActiveDiagramId = (id: string | null): void => {
     const url = new URL(window.location.href);
     if (id) {
       localStorage.setItem(ACTIVE_DIAGRAM_KEY, id);
-      url.searchParams.set("id", id);
-      url.searchParams.delete("diagramId");
+      url.searchParams.set("diagramId", id);
+      url.searchParams.delete("id");
       window.history.replaceState({}, "", url.toString());
     } else {
       localStorage.removeItem(ACTIVE_DIAGRAM_KEY);
-      url.searchParams.delete("id");
       url.searchParams.delete("diagramId");
+      url.searchParams.delete("id");
       window.history.replaceState({}, "", url.toString());
     }
+    window.dispatchEvent(new CustomEvent("activeDiagramIdChanged", { detail: id }));
   } catch (err) {
-    console.error("[backendSync] Error actualizando el ID activo del diagrama:", err);
+    console.error(
+      "[backendSync] Error actualizando el ID activo del diagrama:",
+      err,
+    );
   }
 };
 
@@ -112,14 +118,19 @@ export const loadDiagramFromBackend = async (
     const res = await fetch(`${BACKEND_URL}/diagrams/${diagramId}`);
     if (!res.ok) {
       if (res.status === 404) {
-        console.warn(`[backendSync] Diagrama '${diagramId}' no encontrado en el servidor.`);
+        console.warn(
+          `[backendSync] Diagrama '${diagramId}' no encontrado en el servidor.`,
+        );
       }
       return null;
     }
     const diagram: BackendDiagram = await res.json();
     return diagram;
   } catch (error) {
-    console.error("[backendSync] Fallo al cargar diagrama desde el backend:", error);
+    console.error(
+      "[backendSync] Fallo al cargar diagrama desde el backend:",
+      error,
+    );
     return null;
   }
 };
@@ -169,10 +180,15 @@ export const saveDiagramToBackend = async (
         setActiveDiagramId(null);
         await saveDiagramToBackend(elements, appState, files);
       } else if (!res.ok) {
-        console.error(`[backendSync] Error actualizando diagrama ${activeId} (${res.status})`);
+        console.error(
+          `[backendSync] Error actualizando diagrama ${activeId} (${res.status})`,
+        );
       }
     } catch (err) {
-      console.error("[backendSync] Error de red al enviar PUT /diagrams/:id:", err);
+      console.error(
+        "[backendSync] Error de red al enviar PUT /diagrams/:id:",
+        err,
+      );
     }
   } else {
     // No hay diagramId todavía: crear nuevo con POST /diagrams al primer cambio
@@ -201,19 +217,26 @@ export const saveDiagramToBackend = async (
       if (res.ok) {
         const created: BackendDiagram = await res.json();
         setActiveDiagramId(created.id);
-        console.log(`[backendSync] Nuevo diagrama creado exitosamente en backend: ${created.id}`);
-
       } else {
-        console.error(`[backendSync] Fallo al crear diagrama con POST /diagrams (${res.status})`);
+        console.error(
+          `[backendSync] Fallo al crear diagrama con POST /diagrams (${res.status})`,
+        );
       }
     } catch (err) {
-      console.error("[backendSync] Error de red al enviar POST /diagrams:", err);
+      console.error(
+        "[backendSync] Error de red al enviar POST /diagrams:",
+        err,
+      );
     } finally {
       isCreatingDiagram = false;
       if (pendingUpdate && getActiveDiagramId()) {
         const toSave = pendingUpdate;
         pendingUpdate = null;
-        await saveDiagramToBackend(toSave.elements, toSave.appState, toSave.files);
+        await saveDiagramToBackend(
+          toSave.elements,
+          toSave.appState,
+          toSave.files,
+        );
       }
     }
   }

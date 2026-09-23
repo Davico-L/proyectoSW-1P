@@ -7214,10 +7214,30 @@ class App extends React.Component<AppProps, AppState> {
       // shouldn't edit/create text when inside line editor (often false positive)
 
       if (!this.state.selectedLinearElement?.isEditing) {
+        const hitElement = this.getElementAtPosition(sceneX, sceneY, {
+          includeBoundTextElement: true,
+        });
         const container =
-          // skip binding to container on dblclick when holding ctrl
           !event[KEYS.CTRL_OR_CMD] &&
           this.getTextBindableContainerAtPosition(sceneX, sceneY);
+        let target: ExcalidrawElement | null =
+          (container || hitElement) || null;
+        if (target && isBoundToContainer(target)) {
+          const parentContainer = this.scene.getElement(target.containerId);
+          if (
+            parentContainer?.customData?.type === "umlClass" ||
+            parentContainer?.customData?.type === "umlRelation"
+          ) {
+            target = parentContainer;
+          }
+        }
+        if (
+          target?.customData?.type === "umlClass" ||
+          target?.customData?.type === "umlRelation"
+        ) {
+          this.props.onElementDoubleClick?.(target);
+          return;
+        }
 
         if (container) {
           if (
@@ -12417,7 +12437,16 @@ class App extends React.Component<AppProps, AppState> {
       const selectedTextEditingContainer =
         this.getSelectedTextEditingContainerAtPosition(hitElement, sceneCoords);
 
+      const isUmlTarget =
+        selectedTextEditingContainer?.customData?.type === "umlClass" ||
+        hitElement?.customData?.type === "umlClass" ||
+        (hitElement &&
+          isBoundToContainer(hitElement) &&
+          this.scene.getElement(hitElement.containerId)?.customData?.type ===
+            "umlClass");
+
       if (
+        !isUmlTarget &&
         activeTool.type === this.state.preferredSelectionTool.type &&
         !this.state.editingTextElement &&
         !pointerDownState.drag.hasOccurred &&

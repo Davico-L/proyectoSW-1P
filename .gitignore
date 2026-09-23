@@ -5,10 +5,7 @@ node_modules/
 
 # Variables de entorno y secretos
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
 *.env
 
 # Compilación y distribución (Node.js, React, Flutter)

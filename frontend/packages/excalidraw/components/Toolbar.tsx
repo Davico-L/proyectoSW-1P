@@ -8,6 +8,7 @@ import { t } from "../i18n";
 
 import { useEditorInterface, useStylesPanelMode } from "./App";
 import { HintViewer } from "./HintViewer";
+import { IconButton } from "./IconButton";
 import { Island } from "./Island";
 import { LockButton } from "./LockButton";
 import { PenModeButton } from "./PenModeButton";
@@ -289,6 +290,32 @@ export const Toolbar = ({
         <TextToolButton {...toolProps} />
         {UIOptions.tools?.image !== false && <ImageToolButton {...toolProps} />}
         <EraserToolButton {...toolProps} />
+
+        {app.props.onOpenUmlClassModal && (
+          <IconButton
+            type="button"
+            icon={
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <line x1="3" y1="9" x2="21" y2="9" />
+                <line x1="3" y1="15" x2="21" y2="15" />
+              </svg>
+            }
+            title="Nueva clase UML"
+            aria-label="Nueva clase UML"
+            data-testid="toolbar-uml-class"
+            onClick={() => app.props.onOpenUmlClassModal?.()}
+          />
+        )}
 
         <div
           className="App-toolbar__divider"

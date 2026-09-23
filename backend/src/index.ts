@@ -1,13 +1,21 @@
+import http from "http";
 import dotenv from "dotenv";
 import { app } from "./app";
 import { pool, checkDbConnection } from "./db";
 import { runMigrations } from "./db/migrate";
+import { initSocket } from "./socket";
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT) || 4000;
 
-const server = app.listen(PORT, async () => {
+// Envolver la aplicación Express en un servidor HTTP
+const server = http.createServer(app);
+
+// Inicializar Socket.io sobre el servidor HTTP
+initSocket(server);
+
+server.listen(PORT, async () => {
   console.log(`[Server] Servidor Express corriendo en http://localhost:${PORT}`);
 
   // Verificación preliminar de la base de datos y ejecución de migraciones

@@ -52,7 +52,56 @@ export const AppWelcomeScreen: React.FC<{
       <WelcomeScreen.Hints.ToolbarHint />
       <WelcomeScreen.Hints.HelpHint />
       <WelcomeScreen.Center>
-        <WelcomeScreen.Center.Logo />
+        <WelcomeScreen.Center.Logo>
+          <div className="classdraw-brand-logo">
+            <svg
+              className="classdraw-brand-icon"
+              viewBox="0 0 36 36"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                x="3"
+                y="3"
+                width="30"
+                height="30"
+                rx="6"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                fill="none"
+              />
+              <line
+                x1="3"
+                y1="12"
+                x2="33"
+                y2="12"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <line
+                x1="8"
+                y1="19"
+                x2="19"
+                y2="19"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+              <line
+                x1="8"
+                y1="25"
+                x2="25"
+                y2="25"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span className="classdraw-brand-name">
+              ClassDraw<span className="classdraw-brand-badge">SW</span>
+            </span>
+          </div>
+        </WelcomeScreen.Center.Logo>
         <WelcomeScreen.Center.Heading>
           {headingContent}
         </WelcomeScreen.Center.Heading>

@@ -26,7 +26,6 @@ import {
   debounce,
   getVersion,
   getFrame,
-  isTestEnv,
   preventUnload,
   resolvablePromise,
   isRunningInIframe,
@@ -47,7 +46,7 @@ import {
   share,
   youtubeIcon,
 } from "@excalidraw/excalidraw/components/icons";
-import { isElementLink } from "@excalidraw/element";
+import { isElementLink, isBoundToContainer } from "@excalidraw/element";
 import {
   bumpElementVersions,
   restoreAppState,
@@ -64,6 +63,7 @@ import {
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
 import type { RestoredDataState } from "@excalidraw/excalidraw/data/restore";
 import type {
+  ExcalidrawElement,
   FileId,
   NonDeletedExcalidrawElement,
   OrderedExcalidrawElement,
@@ -75,6 +75,7 @@ import type {
   ExcalidrawInitialDataState,
   UIAppState,
   ExcalidrawProps,
+  PointerDownState,
 } from "@excalidraw/excalidraw/types";
 import type { ResolutionType } from "@excalidraw/common/utility-types";
 import type { ResolvablePromise } from "@excalidraw/common/utils";
@@ -116,13 +117,36 @@ import {
 
 import { updateStaleImageStatuses } from "./data/FileManager";
 import { FileStatusStore } from "./data/fileStatusStore";
-import {
-  importFromLocalStorage,
-} from "./data/localStorage";
+import { importFromLocalStorage } from "./data/localStorage";
 import {
   getActiveDiagramId,
+  setActiveDiagramId,
   loadDiagramFromBackend,
+  ACTIVE_DIAGRAM_KEY,
+  ACTIVE_SESSION_KEY,
+  ACTIVE_USERNAME_KEY,
+  BACKEND_URL,
 } from "./data/backendSync";
+import { LoginScreen } from "./components/LoginScreen";
+import {
+  joinDiagramRoom,
+  leaveDiagramRoom,
+  emitDiagramUpdate,
+  onRemoteUpdate,
+  onDiagramState,
+} from "./data/realtimeSync";
+import { UmlClassModal } from "../src/uml/UmlClassModal";
+import { UmlRelationModal } from "../src/uml/UmlRelationModal";
+import { createUmlClassElement } from "../src/uml/createUmlClassElement";
+import { updateUmlClassElement } from "../src/uml/updateUmlClassElement";
+import { createUmlRelationElement } from "../src/uml/createUmlRelationElement";
+import { updateUmlRelationElement } from "../src/uml/updateUmlRelationElement";
+import type {
+  UmlClassData,
+  UmlRelationData,
+  RelationType,
+} from "../src/uml/types";
+import { IconButton } from "@excalidraw/excalidraw/components/IconButton";
 
 import { loadFilesFromFirebase } from "./data/firebase";
 import {
@@ -232,6 +256,9 @@ const initializeScene = async (opts: {
 
   const localDataState = importFromLocalStorage();
   const activeDiagramId = getActiveDiagramId();
+  if (activeDiagramId) {
+    joinDiagramRoom(activeDiagramId);
+  }
   const backendDiagram = activeDiagramId
     ? await loadDiagramFromBackend(activeDiagramId)
     : null;
@@ -377,15 +404,30 @@ const initializeScene = async (opts: {
   return { scene: null, isExternalScene: false };
 };
 
-const ExcalidrawWrapper = () => {
+const debouncedEmitDiagramUpdate = debounce(
+  (diagramId: string, elements: readonly ExcalidrawElement[]) => {
+    emitDiagramUpdate(diagramId, { elements });
+  },
+  70,
+);
+
+const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
   const excalidrawAPI = useExcalidrawAPI();
+
+  const [activeUsername] = useState<string>(() => {
+    try {
+      return localStorage.getItem(ACTIVE_USERNAME_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
 
   const [errorMessage, setErrorMessage] = useState("");
   const isCollabDisabled = isRunningInIframe();
 
   const { editorTheme, appTheme, setAppTheme } = useHandleAppTheme();
 
-  const [langCode, setLangCode] = useAppLangCode();
+  const [langCode] = useAppLangCode();
 
   const editorInterface = useEditorInterface();
 
@@ -401,6 +443,406 @@ const ExcalidrawWrapper = () => {
   }
 
   const debugCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isApplyingRemoteChange = useRef(false);
+  const [isUmlModalOpen, setIsUmlModalOpen] = useState(false);
+  const [editingUmlElement, setEditingUmlElement] =
+    useState<ExcalidrawElement | null>(null);
+  const umlClassCountRef = useRef(0);
+
+  const handleUmlModalConfirm = (data: UmlClassData) => {
+    if (!excalidrawAPI) {
+      return;
+    }
+
+    if (editingUmlElement) {
+      // Modo edición: buscar texto vinculado del contenedor usando boundElements
+      const allElements = excalidrawAPI.getSceneElements();
+      const boundTextBinding = editingUmlElement.boundElements?.find(
+        (b) => b.type === "text",
+      );
+      const textElement = boundTextBinding
+        ? allElements.find((el) => el.id === boundTextBinding.id)
+        : null;
+
+      updateUmlClassElement(
+        editingUmlElement,
+        textElement,
+        data,
+        excalidrawAPI,
+      );
+
+      setEditingUmlElement(null);
+      setIsUmlModalOpen(false);
+      return;
+    }
+
+    // Modo creación (Fase 1)
+    const appState = excalidrawAPI.getAppState();
+    const offset = umlClassCountRef.current * 15;
+    umlClassCountRef.current += 1;
+
+    const centerX =
+      (appState.width / 2 - (appState.offsetLeft || 0)) / appState.zoom.value -
+      appState.scrollX +
+      offset;
+    const centerY =
+      (appState.height / 2 - (appState.offsetTop || 0)) / appState.zoom.value -
+      appState.scrollY +
+      offset;
+    const { container, text } = createUmlClassElement(data, {
+      x: centerX,
+      y: centerY,
+    });
+
+    excalidrawAPI.updateScene({
+      elements: [...excalidrawAPI.getSceneElements(), container, text],
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+
+    setIsUmlModalOpen(false);
+  };
+
+  const [isUmlRelationModalOpen, setIsUmlRelationModalOpen] = useState(false);
+  const [editingUmlRelationElement, setEditingUmlRelationElement] =
+    useState<ExcalidrawElement | null>(null);
+
+  const handleUmlRelationModalConfirm = (
+    multiplicitySource: string,
+    multiplicityTarget: string,
+  ) => {
+    if (!excalidrawAPI || !editingUmlRelationElement) {
+      return;
+    }
+
+    const allElements = excalidrawAPI.getSceneElements();
+    const boundTextBinding = editingUmlRelationElement.boundElements?.find(
+      (b) => b.type === "text",
+    );
+    const existingLabelText = boundTextBinding
+      ? allElements.find((el) => el.id === boundTextBinding.id) || null
+      : null;
+
+    updateUmlRelationElement(
+      editingUmlRelationElement,
+      existingLabelText,
+      multiplicitySource,
+      multiplicityTarget,
+      excalidrawAPI,
+    );
+
+    setEditingUmlRelationElement(null);
+    setIsUmlRelationModalOpen(false);
+  };
+  const [pendingRelationType, setPendingRelationType] =
+    useState<RelationType | null>(null);
+  const [relationSource, setRelationSource] =
+    useState<ExcalidrawElement | null>(null);
+
+  const pendingRelationTypeRef = useRef<RelationType | null>(null);
+  const relationSourceRef = useRef<ExcalidrawElement | null>(null);
+
+  const updateRelationState = (
+    type: RelationType | null,
+    source: ExcalidrawElement | null,
+  ) => {
+    pendingRelationTypeRef.current = type;
+    relationSourceRef.current = source;
+    setPendingRelationType(type);
+    setRelationSource(source);
+  };
+
+  const cancelRelation = (message?: string) => {
+    updateRelationState(null, null);
+    if (excalidrawAPI) {
+      excalidrawAPI.setActiveTool({ type: "selection" });
+      if (message) {
+        excalidrawAPI.setToast({ message, duration: 3000, closable: true });
+      } else {
+        excalidrawAPI.setToast(null);
+      }
+    }
+  };
+
+  const handleStartRelation = (type: RelationType) => {
+    if (!excalidrawAPI) {
+      return;
+    }
+    if (pendingRelationTypeRef.current === type && !relationSourceRef.current) {
+      cancelRelation("Relación cancelada");
+      return;
+    }
+
+    updateRelationState(type, null);
+    excalidrawAPI.setActiveTool({ type: "custom", customType: "umlRelation" });
+
+    const labelMap: Record<RelationType, string> = {
+      association: "Asociación",
+      inheritance: "Herencia",
+      composition: "Composición",
+      aggregation: "Agregación",
+      manyToMany: "Muchos a Muchos",
+    };
+    excalidrawAPI.setToast({
+      message: `${labelMap[type]}: Haz clic en la clase de origen`,
+      closable: true,
+    });
+  };
+
+  const handlePointerDown = (
+    activeTool: AppState["activeTool"],
+    pointerDownState: PointerDownState,
+  ) => {
+    const currentRelationType = pendingRelationTypeRef.current;
+    if (!currentRelationType || !excalidrawAPI) {
+      return;
+    }
+
+    const { x, y } = pointerDownState.origin;
+    const elements = excalidrawAPI.getSceneElements();
+
+    let hitUmlClass: ExcalidrawElement | null = null;
+
+    // Buscar de arriba hacia abajo (orden z inverso)
+    for (let i = elements.length - 1; i >= 0; i--) {
+      const el = elements[i];
+      if (el.isDeleted) {
+        continue;
+      }
+
+      if (
+        x >= el.x &&
+        x <= el.x + el.width &&
+        y >= el.y &&
+        y <= el.y + el.height
+      ) {
+        let target: ExcalidrawElement = el;
+        if (isBoundToContainer(el)) {
+          const container = elements.find((e) => e.id === el.containerId);
+          if (container) {
+            target = container;
+          }
+        }
+
+        if (target.customData?.type === "umlClass") {
+          hitUmlClass = target;
+          break;
+        } else {
+          // Se clickeó un elemento que no es UML
+          break;
+        }
+      }
+    }
+
+    // Si no se hizo clic sobre una clase UML (clic en lienzo vacío o elemento no UML)
+    if (!hitUmlClass) {
+      cancelRelation(
+        "Selección inválida: se esperaba una clase UML. Creación de relación cancelada.",
+      );
+      return;
+    }
+
+    const currentSource = relationSourceRef.current;
+
+    // Primer clic: seleccionar clase de origen
+    if (!currentSource) {
+      const sourceData = hitUmlClass.customData as UmlClassData | undefined;
+      const sourceName = sourceData?.className || "Clase origen";
+      updateRelationState(currentRelationType, hitUmlClass);
+      excalidrawAPI.setToast({
+        message: `Origen: ${sourceName}. Ahora haz clic en la clase de destino`,
+        closable: true,
+      });
+      return;
+    }
+
+    // Segundo clic:
+    // Si se hace clic en la misma clase
+    if (currentSource.id === hitUmlClass.id) {
+      cancelRelation(
+        "Cancelado: la clase de origen y destino no pueden ser la misma.",
+      );
+      return;
+    }
+
+    // Destino válido: crear relación
+    createUmlRelationElement(
+      currentSource,
+      hitUmlClass,
+      currentRelationType,
+      excalidrawAPI,
+    );
+
+    const sourceData = currentSource.customData as UmlClassData | undefined;
+    const targetData = hitUmlClass.customData as UmlClassData | undefined;
+    const sourceName = sourceData?.className || "Origen";
+    const targetName = targetData?.className || "Destino";
+
+    cancelRelation(`Relación creada entre ${sourceName} y ${targetName}.`);
+  };
+
+  const handleElementDoubleClick = (element: ExcalidrawElement) => {
+    if (pendingRelationTypeRef.current) {
+      return true;
+    }
+    if (element.customData?.type === "umlClass") {
+      setEditingUmlElement(element);
+      setIsUmlModalOpen(true);
+      return true;
+    }
+    if (element.customData?.type === "umlRelation") {
+      setEditingUmlRelationElement(element);
+      setIsUmlRelationModalOpen(true);
+      return true;
+    }
+  };
+
+  const [currentDiagramId, setCurrentDiagramId] = useState<string | null>(() =>
+    getActiveDiagramId(),
+  );
+  const [isGeneratingBackend, setIsGeneratingBackend] = useState(false);
+
+  useEffect(() => {
+    const updateId = () => {
+      const id = getActiveDiagramId();
+      setCurrentDiagramId((prev) => (prev !== id ? id : prev));
+    };
+
+    const handleIdChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string | null>;
+      setCurrentDiagramId(customEvent.detail ?? getActiveDiagramId());
+    };
+
+    window.addEventListener("activeDiagramIdChanged", handleIdChange);
+    const interval = setInterval(updateId, 1000);
+
+    return () => {
+      window.removeEventListener("activeDiagramIdChanged", handleIdChange);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleGenerateBackend = async () => {
+    const diagramId = currentDiagramId || getActiveDiagramId();
+    if (!diagramId || isGeneratingBackend) {
+      return;
+    }
+
+    setIsGeneratingBackend(true);
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/diagrams/${diagramId}/generate-backend`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = "generated-backend.zip";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: "¡Backend generado y descargado con éxito!",
+            duration: 4000,
+            closable: true,
+          });
+        }
+      } else if (response.status === 400) {
+        let errorMsg =
+          "El diagrama debe tener al menos una clase válida para generar el backend";
+        try {
+          const data = await response.json();
+          if (data?.error) {
+            errorMsg = data.error;
+          }
+        } catch {
+          // fallback al mensaje por defecto
+        }
+
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: errorMsg,
+            duration: 6000,
+            closable: true,
+          });
+        } else {
+          alert(errorMsg);
+        }
+      } else {
+        const fallbackMsg = "No se pudo generar el backend, intenta de nuevo";
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: fallbackMsg,
+            duration: 6000,
+            closable: true,
+          });
+        } else {
+          alert(fallbackMsg);
+        }
+      }
+    } catch (error) {
+      console.error("[generateBackend] Error al generar el backend:", error);
+      const fallbackMsg = "No se pudo generar el backend, intenta de nuevo";
+      if (excalidrawAPI) {
+        excalidrawAPI.setToast({
+          message: fallbackMsg,
+          duration: 6000,
+          closable: true,
+        });
+      } else {
+        alert(fallbackMsg);
+      }
+    } finally {
+      setIsGeneratingBackend(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!excalidrawAPI) {
+      return;
+    }
+
+    const applyRemoteChange = (elements: readonly ExcalidrawElement[]) => {
+      if (!elements) {
+        return;
+      }
+
+      isApplyingRemoteChange.current = true;
+      try {
+        excalidrawAPI.updateScene({
+          elements,
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
+      } catch (err) {
+        console.error(
+          "[realtimeSync] Error al aplicar actualización remota:",
+          err,
+        );
+      } finally {
+        setTimeout(() => {
+          isApplyingRemoteChange.current = false;
+        }, 0);
+      }
+    };
+
+    const unsubscribeDiagramState = onDiagramState(applyRemoteChange);
+    const unsubscribeRemoteUpdate = onRemoteUpdate(applyRemoteChange);
+
+    return () => {
+      unsubscribeDiagramState();
+      unsubscribeRemoteUpdate();
+    };
+  }, [excalidrawAPI]);
 
   useEffect(() => {
     trackEvent("load", "frame", getFrame());
@@ -655,8 +1097,31 @@ const ExcalidrawWrapper = () => {
     appState: AppState,
     files: BinaryFiles,
   ) => {
+    if (
+      pendingRelationTypeRef.current &&
+      appState.activeTool.type !== "custom" &&
+      appState.activeTool.type !== "selection"
+    ) {
+      pendingRelationTypeRef.current = null;
+      relationSourceRef.current = null;
+      setPendingRelationType(null);
+      setRelationSource(null);
+    }
+
+    if (isApplyingRemoteChange.current) {
+      return;
+    }
+
     if (collabAPI?.isCollaborating()) {
       collabAPI.syncElements(elements);
+    }
+
+    const activeDiagramId = getActiveDiagramId();
+    if (activeDiagramId !== currentDiagramId) {
+      setCurrentDiagramId(activeDiagramId);
+    }
+    if (activeDiagramId) {
+      debouncedEmitDiagramUpdate(activeDiagramId, elements);
     }
 
     // this check is redundant, but since this is a hot path, it's best
@@ -888,6 +1353,15 @@ const ExcalidrawWrapper = () => {
         userToFollow={userToFollow}
         onChange={onChange}
         onExport={onExport}
+        onOpenUmlClassModal={() => {
+          cancelRelation();
+          setEditingUmlElement(null);
+          setEditingUmlRelationElement(null);
+          setIsUmlRelationModalOpen(false);
+          setIsUmlModalOpen(true);
+        }}
+        onElementDoubleClick={handleElementDoubleClick}
+        onPointerDown={handlePointerDown}
         initialData={initialStatePromiseRef.current.promise}
         isCollaborating={isCollaborating}
         onPointerUpdate={collabAPI?.onPointerUpdate}
@@ -931,26 +1405,357 @@ const ExcalidrawWrapper = () => {
         theme={editorTheme}
         onThemeChange={setAppTheme}
         renderTopRightUI={(isMobile) => {
-          if (isMobile || !collabAPI || isCollabDisabled) {
-            return null;
-          }
-
           return (
-            <div className="excalidraw-ui-top-right">
-              {excalidrawAPI?.getEditorInterface().formFactor === "desktop" && (
-                <ExcalidrawPlusPromoBanner
-                  isSignedIn={isExcalidrawPlusSignedUser}
-                />
+            <div
+              className="excalidraw-ui-top-right"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <IconButton
+                type="button"
+                title="Nueva clase UML"
+                aria-label="Nueva clase UML"
+                data-testid="toolbar-new-uml-class"
+                onClick={() => {
+                  cancelRelation();
+                  setEditingUmlElement(null);
+                  setIsUmlModalOpen(true);
+                }}
+                icon={
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                    <line x1="3" y1="15" x2="21" y2="15" />
+                  </svg>
+                }
+              />
+              <IconButton
+                type="button"
+                title="Relación UML: Asociación"
+                aria-label="Relación UML: Asociación"
+                data-testid="toolbar-relation-association"
+                style={
+                  pendingRelationType === "association"
+                    ? { backgroundColor: "var(--color-primary-light, #e0dfff)" }
+                    : undefined
+                }
+                onClick={() => handleStartRelation("association")}
+                icon={
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                }
+              />
+              <IconButton
+                type="button"
+                title="Relación UML: Herencia"
+                aria-label="Relación UML: Herencia"
+                data-testid="toolbar-relation-inheritance"
+                style={
+                  pendingRelationType === "inheritance"
+                    ? { backgroundColor: "var(--color-primary-light, #e0dfff)" }
+                    : undefined
+                }
+                onClick={() => handleStartRelation("inheritance")}
+                icon={
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="5" y1="12" x2="14" y2="12" />
+                    <polygon points="14 7 21 12 14 17" fill="none" />
+                  </svg>
+                }
+              />
+              <IconButton
+                type="button"
+                title="Relación UML: Composición"
+                aria-label="Relación UML: Composición"
+                data-testid="toolbar-relation-composition"
+                style={
+                  pendingRelationType === "composition"
+                    ? { backgroundColor: "var(--color-primary-light, #e0dfff)" }
+                    : undefined
+                }
+                onClick={() => handleStartRelation("composition")}
+                icon={
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon
+                      points="3 12 8 7 13 12 8 17"
+                      fill="currentColor"
+                    />
+                    <line x1="13" y1="12" x2="21" y2="12" />
+                  </svg>
+                }
+              />
+              <IconButton
+                type="button"
+                title="Relación UML: Agregación"
+                aria-label="Relación UML: Agregación"
+                data-testid="toolbar-relation-aggregation"
+                style={
+                  pendingRelationType === "aggregation"
+                    ? { backgroundColor: "var(--color-primary-light, #e0dfff)" }
+                    : undefined
+                }
+                onClick={() => handleStartRelation("aggregation")}
+                icon={
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon points="3 12 8 7 13 12 8 17" fill="none" />
+                    <line x1="13" y1="12" x2="21" y2="12" />
+                  </svg>
+                }
+              />
+              <button
+                type="button"
+                className="generate-backend-button"
+                data-testid="toolbar-generate-backend"
+                disabled={!currentDiagramId || isGeneratingBackend}
+                onClick={handleGenerateBackend}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  borderRadius: "8px",
+                  backgroundColor:
+                    !currentDiagramId || isGeneratingBackend
+                      ? "var(--color-surface-lowest, #f1f3f5)"
+                      : "var(--color-primary, #6965db)",
+                  color:
+                    !currentDiagramId || isGeneratingBackend
+                      ? "var(--color-text-secondary, #9ca3af)"
+                      : "#ffffff",
+                  border: "1px solid transparent",
+                  cursor:
+                    !currentDiagramId || isGeneratingBackend
+                      ? "not-allowed"
+                      : "pointer",
+                  transition: "all 0.15s ease",
+                  opacity: !currentDiagramId || isGeneratingBackend ? 0.6 : 1,
+                  boxShadow:
+                    !currentDiagramId || isGeneratingBackend
+                      ? "none"
+                      : "0 1px 2px rgba(0, 0, 0, 0.08)",
+                }}
+                title={
+                  !currentDiagramId
+                    ? "Guarda el diagrama primero para generar el backend"
+                    : isGeneratingBackend
+                    ? "Generando proyecto Spring Boot..."
+                    : "Generar y descargar backend Spring Boot (CU5)"
+                }
+              >
+                {isGeneratingBackend ? (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      animation: "spin 1s linear infinite",
+                    }}
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                )}
+                <span>
+                  {isGeneratingBackend ? "Generando..." : "Generar Backend"}
+                </span>
+              </button>
+              {pendingRelationType && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    backgroundColor: "var(--color-primary-light, #eff6ff)",
+                    border: "1px solid var(--color-primary, #3b82f6)",
+                    color: "var(--color-primary-darker, #1e40af)",
+                  }}
+                >
+                  <span>
+                    {relationSource
+                      ? "Seleccione la clase de destino"
+                      : "Seleccione la clase de origen"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      cancelRelation("Creación de relación cancelada.")
+                    }
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "0 2px",
+                      fontWeight: "bold",
+                      color: "inherit",
+                    }}
+                    title="Cancelar relación"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              {activeUsername && (
+                <div
+                  className="session-user-badge"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "4px 10px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    borderRadius: "8px",
+                    backgroundColor: "var(--color-surface-low, #f1f3f5)",
+                    color: "var(--color-on-surface, #212529)",
+                    border: "1px solid var(--color-surface-lowest, #e2e8f0)",
+                  }}
+                  title={`Sesión activa: ${activeUsername}`}
+                >
+                  <span
+                    style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      backgroundColor: "#10b981",
+                      display: "inline-block",
+                    }}
+                  />
+                  <span>{activeUsername}</span>
+                </div>
               )}
 
-              {collabError.message && <CollabError collabError={collabError} />}
-              <LiveCollaborationTrigger
-                isCollaborating={isCollaborating}
-                onSelect={() =>
-                  setShareDialogState({ isOpen: true, type: "share" })
-                }
-                editorInterface={editorInterface}
-              />
+              <button
+                type="button"
+                onClick={onLogout}
+                className="session-logout-button"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 12px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  borderRadius: "8px",
+                  backgroundColor: "#fee2e2",
+                  color: "#b91c1c",
+                  border: "1px solid #fca5a5",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+                title="Cerrar sesión actual y volver al inicio"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Cerrar sesión</span>
+              </button>
+
+              {!isMobile && collabAPI && !isCollabDisabled && (
+                <>
+                  {excalidrawAPI?.getEditorInterface().formFactor ===
+                    "desktop" && (
+                    <ExcalidrawPlusPromoBanner
+                      isSignedIn={isExcalidrawPlusSignedUser}
+                    />
+                  )}
+
+                  {collabError.message && (
+                    <CollabError collabError={collabError} />
+                  )}
+                  <LiveCollaborationTrigger
+                    isCollaborating={isCollaborating}
+                    onSelect={() =>
+                      setShareDialogState({ isOpen: true, type: "share" })
+                    }
+                    editorInterface={editorInterface}
+                  />
+                </>
+              )}
             </div>
           );
         }}
@@ -971,6 +1776,7 @@ const ExcalidrawWrapper = () => {
           isCollabEnabled={!isCollabDisabled}
           theme={appTheme}
           refresh={() => forceRefresh((prev) => !prev)}
+          onLogout={onLogout}
         />
         <AppWelcomeScreen
           onCollabDialogOpen={onCollabDialogOpen}
@@ -1235,22 +2041,111 @@ const ExcalidrawWrapper = () => {
           />
         )}
       </Excalidraw>
+
+      {isUmlModalOpen && (
+        <UmlClassModal
+          initialData={
+            editingUmlElement?.customData?.type === "umlClass"
+              ? (editingUmlElement.customData as UmlClassData)
+              : undefined
+          }
+          onConfirm={handleUmlModalConfirm}
+          onCancel={() => {
+            setIsUmlModalOpen(false);
+            setEditingUmlElement(null);
+          }}
+        />
+      )}
+
+      {isUmlRelationModalOpen && (
+        <UmlRelationModal
+          initialData={
+            editingUmlRelationElement?.customData?.type === "umlRelation"
+              ? {
+                  multiplicitySource: (
+                    editingUmlRelationElement.customData as UmlRelationData
+                  )?.multiplicitySource,
+                  multiplicityTarget: (
+                    editingUmlRelationElement.customData as UmlRelationData
+                  )?.multiplicityTarget,
+                }
+              : undefined
+          }
+          onConfirm={handleUmlRelationModalConfirm}
+          onCancel={() => {
+            setIsUmlRelationModalOpen(false);
+            setEditingUmlRelationElement(null);
+          }}
+        />
+      )}
     </div>
   );
 };
 
 const ExcalidrawApp = () => {
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(ACTIVE_SESSION_KEY);
+    } catch {
+      return null;
+    }
+  });
+
   const isCloudExportWindow =
     window.location.pathname === "/excalidraw-plus-export";
   if (isCloudExportWindow) {
     return <ExcalidrawPlusIframeExport />;
   }
 
+  const handleLoginSuccess = (newSessionId: string, _username: string) => {
+    setSessionId(newSessionId);
+  };
+
+  const handleLogout = () => {
+    try {
+      debouncedEmitDiagramUpdate.cancel();
+
+      // Abandonar la sala activa de Socket.IO
+      leaveDiagramRoom();
+
+      // Limpiar claves de sesión de usuario
+      localStorage.removeItem(ACTIVE_SESSION_KEY);
+      localStorage.removeItem(ACTIVE_USERNAME_KEY);
+
+      // 1. Eliminar clave active_diagram_id de localStorage
+      localStorage.removeItem(ACTIVE_DIAGRAM_KEY);
+
+      // 2. Limpiar parámetro ?diagramId= (e ?id= por compatibilidad) de la URL mediante setActiveDiagramId y replaceState
+      setActiveDiagramId(null);
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("diagramId") || url.searchParams.has("id")) {
+        url.searchParams.delete("diagramId");
+        url.searchParams.delete("id");
+        window.history.replaceState({}, "", url.toString());
+      }
+
+      // 3. Limpiar claves de caché local de Excalidraw para evitar trazos residuales
+      localStorage.removeItem(STORAGE_KEYS.LOCAL_STORAGE_ELEMENTS); // "excalidraw"
+      localStorage.removeItem(STORAGE_KEYS.LOCAL_STORAGE_APP_STATE); // "excalidraw-state"
+    } catch (err) {
+      console.warn("[App] Error al limpiar almacenamiento en logout:", err);
+    }
+    setSessionId(null);
+  };
+
+  if (!sessionId) {
+    return (
+      <TopErrorBoundary>
+        <LoginScreen onLoginSuccess={handleLoginSuccess} />
+      </TopErrorBoundary>
+    );
+  }
+
   return (
     <TopErrorBoundary>
       <Provider store={appJotaiStore}>
         <ExcalidrawAPIProvider>
-          <ExcalidrawWrapper />
+          <ExcalidrawWrapper onLogout={handleLogout} />
         </ExcalidrawAPIProvider>
       </Provider>
     </TopErrorBoundary>

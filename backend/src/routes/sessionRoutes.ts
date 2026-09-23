@@ -3,28 +3,44 @@ import { createSession, getSession } from "../services/sessionService";
 
 export const sessionRouter = Router();
 
+// POST /session: Crear una nueva sesión
 sessionRouter.post("/", async (req: Request, res: Response): Promise<void> => {
-  const { username } = req.body;
-
-  if (!username || typeof username !== "string" || username.trim() === "") {
-    res.status(400).json({
-      error: "El campo 'username' es requerido y debe ser una cadena no vacía.",
+  try {
+    const rawUsername = typeof req.body?.username === "string" ? req.body.username : undefined;
+    const session = await createSession(rawUsername);
+    res.status(201).json(session);
+  } catch (error: any) {
+    console.error("[sessionRoutes] Error en POST /session:", error);
+    res.status(500).json({
+      error: "Error interno al crear la sesión en la base de datos.",
+      details: error?.message,
     });
-    return;
   }
-
-  const session = await createSession(username);
-  res.status(201).json(session);
 });
 
+// GET /session/:sessionId: Obtener información de una sesión por ID
 sessionRouter.get("/:sessionId", async (req: Request, res: Response): Promise<void> => {
-  const { sessionId } = req.params;
-  const session = await getSession(sessionId);
+  try {
+    const { sessionId } = req.params;
 
-  if (!session) {
-    res.status(404).json({ error: "Sesión no encontrada." });
-    return;
+    if (!sessionId || typeof sessionId !== "string") {
+      res.status(400).json({ error: "Identificador de sesión inválido." });
+      return;
+    }
+
+    const session = await getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: "Sesión no encontrada." });
+      return;
+    }
+
+    res.status(200).json(session);
+  } catch (error: any) {
+    console.error("[sessionRoutes] Error en GET /session/:sessionId:", error);
+    res.status(500).json({
+      error: "Error interno al consultar la sesión.",
+      details: error?.message,
+    });
   }
-
-  res.status(200).json(session);
 });

@@ -6,6 +6,8 @@ import {
   updateDiagram,
   listDiagramsBySession,
 } from "../services/diagramService";
+import { extractUmlModel } from "../backendGenerator/extractModel";
+import { buildBackendZip } from "../backendGenerator/buildZip";
 
 export const diagramRouter = Router();
 
@@ -132,3 +134,40 @@ diagramRouter.put("/:id", async (req: Request, res: Response): Promise<void> => 
     });
   }
 });
+
+// POST /diagrams/:id/generate-backend: Generar y descargar el backend Spring Boot como archivo ZIP
+diagramRouter.post("/:id/generate-backend", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "Identificador de diagrama inválido." });
+      return;
+    }
+
+    const diagram = await getDiagramById(id);
+    if (!diagram) {
+      res.status(404).json({ error: "Diagrama no encontrado" });
+      return;
+    }
+
+    const model = extractUmlModel(diagram.data);
+    const zipBuffer = await buildBackendZip(model);
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", 'attachment; filename="generated-backend.zip"');
+    res.send(zipBuffer);
+  } catch (error: any) {
+    if (
+      error instanceof Error &&
+      error.message === "El diagrama debe tener al menos una clase válida para generar el backend"
+    ) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+
+    console.error("[diagramRoutes] Error en POST /diagrams/:id/generate-backend:", error);
+    res.status(500).json({ error: "Error generando el backend" });
+  }
+});
+

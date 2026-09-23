@@ -822,6 +822,8 @@ export interface ExcalidrawProps {
    * Invoked once the initial scene is loaded.
    */
   onInitialize?: (api: ExcalidrawImperativeAPI) => void;
+  onOpenUmlClassModal?: () => void;
+  onElementDoubleClick?: (element: ExcalidrawElement) => boolean | void;
   isCollaborating?: boolean;
   onPointerUpdate?: (payload: {
     pointer: { x: number; y: number; tool: "pointer" | "laser" };

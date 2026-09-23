@@ -116,6 +116,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
     viewportStatusFrame,
     currentUserControls,
     imageOptions,
+    onElementDoubleClick,
   } = props;
 
   const canvasActions = props.UIOptions?.canvasActions;
@@ -258,6 +259,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
           viewportStatusFrame={viewportStatusFrame}
           currentUserControls={currentUserControls}
           imageOptions={normalizedImageOptions}
+          onElementDoubleClick={onElementDoubleClick}
         >
           {children}
         </App>

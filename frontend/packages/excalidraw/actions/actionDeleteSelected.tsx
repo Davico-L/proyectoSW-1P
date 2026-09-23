@@ -10,6 +10,7 @@ import { LinearElementEditor } from "@excalidraw/element";
 import { newElementWith } from "@excalidraw/element";
 import { getContainerElement } from "@excalidraw/element";
 import {
+  isArrowElement,
   isBoundToContainer,
   isElbowArrow,
   isFrameLikeElement,
@@ -41,6 +42,50 @@ const deleteSelectedElements = (
   appState: AppState,
   app: AppClassProperties,
 ) => {
+  const elementsToDelete: Record<ExcalidrawElement["id"], true> = {
+    ...appState.selectedElementIds,
+  };
+
+  // 1. Identificar clases UML seleccionadas
+  const selectedUmlClassIds = new Set<ExcalidrawElement["id"]>();
+  for (const el of elements) {
+    if (
+      !el.isDeleted &&
+      elementsToDelete[el.id] &&
+      el.customData?.type === "umlClass"
+    ) {
+      selectedUmlClassIds.add(el.id);
+    }
+  }
+
+  // 2. Recolectar flechas conectadas combinando dos fuentes
+  if (selectedUmlClassIds.size > 0) {
+    // Fuente 1: boundElements de cada clase UML seleccionada
+    for (const el of elements) {
+      if (selectedUmlClassIds.has(el.id) && el.boundElements) {
+        for (const bound of el.boundElements) {
+          if (bound.type === "arrow") {
+            elementsToDelete[bound.id] = true;
+          }
+        }
+      }
+    }
+
+    // Fuente 2: cualquier flecha en la escena cuyo startBinding o endBinding apunte a la clase
+    for (const el of elements) {
+      if (!el.isDeleted && isArrowElement(el)) {
+        const startId = el.startBinding?.elementId;
+        const endId = el.endBinding?.elementId;
+        if (
+          (startId && selectedUmlClassIds.has(startId)) ||
+          (endId && selectedUmlClassIds.has(endId))
+        ) {
+          elementsToDelete[el.id] = true;
+        }
+      }
+    }
+  }
+
   const framesToBeDeleted = new Set(
     getSelectedElements(
       elements.filter((el) => isFrameLikeElement(el)),
@@ -76,7 +121,7 @@ const deleteSelectedElements = (
   let shouldSelectEditingGroup = true;
 
   const nextElements = elements.map((el) => {
-    if (appState.selectedElementIds[el.id]) {
+    if (elementsToDelete[el.id]) {
       const boundElement = isBoundToContainer(el)
         ? getContainerElement(el, elementsMap)
         : null;
@@ -121,7 +166,7 @@ const deleteSelectedElements = (
       return newElementWith(el, { frameId: null });
     }
 
-    if (isBoundToContainer(el) && appState.selectedElementIds[el.containerId]) {
+    if (isBoundToContainer(el) && elementsToDelete[el.containerId]) {
       return newElementWith(el, { isDeleted: true });
     }
     return el;
