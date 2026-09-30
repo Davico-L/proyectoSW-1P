@@ -1,5 +1,9 @@
 import React, { useState } from "react";
-import { BACKEND_URL, ACTIVE_SESSION_KEY, ACTIVE_USERNAME_KEY } from "../data/backendSync";
+import {
+  BACKEND_URL,
+  ACTIVE_SESSION_KEY,
+  ACTIVE_USERNAME_KEY,
+} from "../data/backendSync";
 import "./LoginScreen.scss";
 
 interface LoginScreenProps {
@@ -13,6 +17,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) {
+      return;
+    }
+
     setLoading(true);
     setErrorMessage(null);
 
@@ -30,7 +38,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({}));
         throw new Error(
-          errorBody.error || `Error al crear la sesión (Status: ${response.status})`
+          errorBody.error ||
+            `Error al crear la sesión (Status: ${response.status})`,
         );
       }
 
@@ -50,9 +59,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     } catch (err: any) {
       console.error("[LoginScreen] Error de conexión o autenticación:", err);
       setErrorMessage(
-        err.message?.includes("Failed to fetch") || err.message?.includes("NetworkError")
+        err.message?.includes("Failed to fetch") ||
+          err.message?.includes("NetworkError")
           ? `No se pudo conectar con el servidor backend (${BACKEND_URL}). Asegúrate de que el backend esté iniciado.`
-          : err.message || "Ocurrió un error inesperado al iniciar sesión."
+          : err.message || "Ocurrió un error inesperado al iniciar sesión.",
       );
     } finally {
       setLoading(false);
@@ -61,67 +71,111 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="login-screen-container">
-      <div className="login-card">
-        <div className="login-header">
-          <span className="login-badge">CU15 • Gestión de Sesión</span>
-          <div className="login-logo">
+      <main className="login-card" role="main">
+        <header className="login-header">
+          <div className="login-brand" aria-label="ClassDrawSW">
             <svg
-              viewBox="0 0 24 24"
+              className="login-brand-icon"
+              viewBox="0 0 36 36"
               fill="none"
-              stroke="#6366f1"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
             >
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="3" y1="9" x2="21" y2="9" />
-              <line x1="9" y1="21" x2="9" y2="9" />
+              <rect
+                x="3"
+                y="3"
+                width="30"
+                height="30"
+                rx="6"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                fill="none"
+              />
+              <line
+                x1="3"
+                y1="12"
+                x2="33"
+                y2="12"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <line
+                x1="8"
+                y1="19"
+                x2="19"
+                y2="19"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+              <line
+                x1="8"
+                y1="25"
+                x2="25"
+                y2="25"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
             </svg>
+            <h1 className="login-title">
+              ClassDraw<span className="login-brand-badge">SW</span>
+            </h1>
           </div>
-          <h1 className="login-title">Iniciar Sesión</h1>
           <p className="login-subtitle">
-            Ingresa tu nombre para acceder y colaborar en el lienzo de trabajo.
+            Diseña diagramas de clases de forma colaborativa, con ayuda de IA.
           </p>
-        </div>
+        </header>
 
-        <form className="login-form" onSubmit={handleSubmit}>
+        <form className="login-form" onSubmit={handleSubmit} noValidate>
           <div className="form-group">
-            <label htmlFor="username-input">Nombre de usuario</label>
+            <label htmlFor="username-input" className="form-label">
+              Nombre de usuario
+            </label>
             <input
               id="username-input"
               type="text"
               className="login-input"
-              placeholder="Tu nombre (opcional)"
+              placeholder="Ej. Ana Gómez (opcional)"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
               autoFocus
-              autoComplete="off"
+              autoComplete="nickname"
+              aria-describedby="username-helper"
             />
-            <span className="helper-text">
-              Si dejas este campo vacío, se te asignará automáticamente un nombre de invitado (ej. Invitado-1234).
-            </span>
+            <p id="username-helper" className="helper-text">
+              Si lo dejas vacío, se te asignará un nombre de invitado.
+            </p>
           </div>
 
-          {errorMessage && (
-            <div className="error-alert">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <div>{errorMessage}</div>
-            </div>
-          )}
+          <div
+            className="error-container"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {errorMessage && (
+              <div className="error-alert" role="alert">
+                <svg
+                  className="error-icon"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>{errorMessage}</span>
+              </div>
+            )}
+          </div>
 
           <button
             type="submit"
@@ -130,8 +184,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           >
             {loading ? (
               <>
-                <span className="spinner" />
-                <span>Iniciando sesión...</span>
+                <span className="spinner" aria-hidden="true" />
+                <span>Entrando...</span>
               </>
             ) : (
               <>
@@ -145,6 +199,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  aria-hidden="true"
                 >
                   <line x1="5" y1="12" x2="19" y2="12" />
                   <polyline points="12 5 19 12 12 19" />
@@ -153,11 +208,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             )}
           </button>
         </form>
-
-        <div className="login-footer">
-          Lienzo de Diagramas • PostgreSQL conectado
-        </div>
-      </div>
+      </main>
     </div>
   );
 };

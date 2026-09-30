@@ -1,6 +1,12 @@
-import { newElementWith, computeBoundTextPosition } from "@excalidraw/element";
+import { getFontString, FONT_FAMILY } from "@excalidraw/common";
+import {
+  newElementWith,
+  computeBoundTextPosition,
+  measureText,
+} from "@excalidraw/element";
 import type {
   ExcalidrawElement,
+  ExcalidrawTextElement,
   ExcalidrawTextElementWithContainer,
 } from "@excalidraw/element/types";
 import { CaptureUpdateAction } from "@excalidraw/excalidraw";
@@ -69,10 +75,25 @@ export function updateUmlClassElement(
     );
   }
 
-  // 2. Actualizar texto con el nuevo label
-  const updatedText = newElementWith(targetTextElement, {
+  const textEl = targetTextElement as ExcalidrawTextElement;
+  const targetFontFamily = FONT_FAMILY["Liberation Sans"];
+  const fontString = getFontString({
+    fontSize: textEl.fontSize,
+    fontFamily: targetFontFamily,
+  });
+  const metrics = measureText(
+    labelText,
+    fontString,
+    textEl.lineHeight,
+  );
+
+  // 2. Actualizar texto con el nuevo label, nueva fuente y sus dimensiones recalculadas
+  const updatedText = newElementWith(textEl, {
     text: labelText,
     originalText: labelText,
+    fontFamily: targetFontFamily,
+    width: metrics.width,
+    height: metrics.height,
   });
 
   // 3. Recalcular la posición centrada del texto respecto al contenedor actualizado

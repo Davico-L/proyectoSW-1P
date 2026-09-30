@@ -42,12 +42,13 @@ const VISIBILITY_SYMBOLS: Record<"public" | "private" | "protected", string> = {
 };
 
 export function buildUmlClassLabel(data: UmlClassData): string {
-  const parts: string[] = [data.className];
+  const classNameUpper = (data.className || "").toUpperCase();
+  const parts: string[] = [classNameUpper];
   const hasAttributes = data.attributes && data.attributes.length > 0;
   const hasMethods = data.methods && data.methods.length > 0;
 
   if (!hasAttributes && !hasMethods) {
-    return data.className;
+    return classNameUpper;
   }
 
   if (hasAttributes) {

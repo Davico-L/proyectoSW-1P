@@ -1,3 +1,4 @@
+import { FONT_FAMILY } from "@excalidraw/common";
 import {
   newElement,
   newTextElement,
@@ -61,7 +62,7 @@ export function createUmlClassElement(
     verticalAlign: "middle",
     autoResize: true,
     fontSize: 16,
-    fontFamily: 1,
+    fontFamily: FONT_FAMILY["Liberation Sans"],
   });
 
   // 3. Calcular la posición inicial del texto

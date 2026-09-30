@@ -13,7 +13,8 @@ import type { RelationType, UmlRelationData } from "./types";
  * - inheritance → endArrowhead: "triangle_outline"
  * - composition → startArrowhead: "diamond"
  * - aggregation → startArrowhead: "diamond_outline"
- * - association → endArrowhead: "arrow"
+ * - association → línea simple sin punta (startArrowhead: null, endArrowhead: null)
+ * - manyToMany  → línea simple sin punta (startArrowhead: null, endArrowhead: null)
  */
 function getArrowheads(relationType: RelationType): {
   startArrowhead: "diamond" | "diamond_outline" | null;
@@ -26,9 +27,10 @@ function getArrowheads(relationType: RelationType): {
       return { startArrowhead: "diamond", endArrowhead: null };
     case "aggregation":
       return { startArrowhead: "diamond_outline", endArrowhead: null };
+    case "manyToMany":
     case "association":
     default:
-      return { startArrowhead: null, endArrowhead: "arrow" };
+      return { startArrowhead: null, endArrowhead: null };
   }
 }
 
