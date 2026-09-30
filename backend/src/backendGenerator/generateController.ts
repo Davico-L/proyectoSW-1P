@@ -27,17 +27,26 @@ export function generateRestController(
   const rootClass = findRootInheritanceClass(umlClass, allClasses, relations);
   const idInfo = getIdAttributeInfo(rootClass);
 
-  return [
-    "package com.example.generatedbackend.controller;",
-    "",
+  const importLines: string[] = [
     `import com.example.generatedbackend.entity.${className};`,
     `import com.example.generatedbackend.repository.${className}Repository;`,
     "import org.springframework.beans.factory.annotation.Autowired;",
     "import org.springframework.http.ResponseEntity;",
     "import org.springframework.web.bind.annotation.*;",
     "",
-    "import java.util.List;",
-    "import java.util.Optional;",
+  ];
+
+  if (idType === "LocalDate") {
+    importLines.push("import java.time.LocalDate;");
+  }
+
+  importLines.push("import java.util.List;");
+  importLines.push("import java.util.Optional;");
+
+  return [
+    "package com.example.generatedbackend.controller;",
+    "",
+    ...importLines,
     "",
     "@RestController",
     `@RequestMapping("/api/${pluralTableName}")`,

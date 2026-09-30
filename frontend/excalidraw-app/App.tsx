@@ -1,6 +1,5 @@
 import {
   Excalidraw,
-  LiveCollaborationTrigger,
   TTDDialogTrigger,
   CaptureUpdateAction,
   reconcileElements,
@@ -132,6 +131,7 @@ import {
   joinDiagramRoom,
   leaveDiagramRoom,
   emitDiagramUpdate,
+  debouncedEmitDiagramUpdate,
   onRemoteUpdate,
   onDiagramState,
 } from "./data/realtimeSync";
@@ -141,6 +141,10 @@ import { createUmlClassElement } from "../src/uml/createUmlClassElement";
 import { updateUmlClassElement } from "../src/uml/updateUmlClassElement";
 import { createUmlRelationElement } from "../src/uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../src/uml/updateUmlRelationElement";
+import { AiChatButton } from "../src/aiEdit/AiChatButton";
+import { AiChatPanel } from "../src/aiEdit/AiChatPanel";
+import { importXmiToCanvas } from "../src/xmiImporter/importXmiToCanvas";
+import { formatImportSummary } from "../src/xmiImporter/formatImportSummary";
 import type {
   UmlClassData,
   UmlRelationData,
@@ -170,7 +174,6 @@ import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 
 import "./index.scss";
 
-import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
 
 import type { CollabAPI } from "./collab/Collab";
@@ -249,6 +252,13 @@ const initializeScene = async (opts: {
 > => {
   const searchParams = new URLSearchParams(window.location.search);
   const id = searchParams.get("id");
+  const urlDiagramId = searchParams.get("diagramId");
+  if (
+    urlDiagramId &&
+    urlDiagramId !== localStorage.getItem(ACTIVE_DIAGRAM_KEY)
+  ) {
+    setActiveDiagramId(urlDiagramId);
+  }
   const jsonBackendMatch = window.location.hash.match(
     /^#json=([a-zA-Z0-9_-]+),([a-zA-Z0-9_-]+)$/,
   );
@@ -404,15 +414,17 @@ const initializeScene = async (opts: {
   return { scene: null, isExternalScene: false };
 };
 
-const debouncedEmitDiagramUpdate = debounce(
-  (diagramId: string, elements: readonly ExcalidrawElement[]) => {
-    emitDiagramUpdate(diagramId, { elements });
-  },
-  70,
-);
-
 const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
   const excalidrawAPI = useExcalidrawAPI();
+
+  useEffect(() => {
+    if (excalidrawAPI && import.meta.env.DEV) {
+      (window as any).__excalidrawAPI = excalidrawAPI;
+    }
+    return () => {
+      delete (window as any).__excalidrawAPI;
+    };
+  }, [excalidrawAPI]);
 
   const [activeUsername] = useState<string>(() => {
     try {
@@ -505,6 +517,7 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
   const [isUmlRelationModalOpen, setIsUmlRelationModalOpen] = useState(false);
   const [editingUmlRelationElement, setEditingUmlRelationElement] =
     useState<ExcalidrawElement | null>(null);
+  const [isAiChatOpen, setIsAiChatOpen] = useState(false);
 
   const handleUmlRelationModalConfirm = (
     multiplicitySource: string,
@@ -700,6 +713,87 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
     getActiveDiagramId(),
   );
   const [isGeneratingBackend, setIsGeneratingBackend] = useState(false);
+  const [isExportingXmi, setIsExportingXmi] = useState(false);
+  const [isImportingXmi, setIsImportingXmi] = useState(false);
+  const xmiFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isShareCopied, setIsShareCopied] = useState(false);
+  const sharePopoverRef = useRef<HTMLDivElement>(null);
+  const shareInputRef = useRef<HTMLInputElement>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isShareOpen) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        sharePopoverRef.current &&
+        !sharePopoverRef.current.contains(event.target as Node)
+      ) {
+        setIsShareOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsShareOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+
+    const timer = setTimeout(() => {
+      shareInputRef.current?.select();
+    }, 50);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isShareOpen]);
+
+  const handleCopyShareUrl = async () => {
+    const activeId = currentDiagramId || getActiveDiagramId();
+    if (!activeId) {
+      return;
+    }
+    const url = `${window.location.origin}/?diagramId=${activeId}`;
+
+    let copied = false;
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+
+    if (!copied) {
+      shareInputRef.current?.select();
+    }
+
+    setIsShareCopied(true);
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = setTimeout(() => {
+      setIsShareCopied(false);
+    }, 2000);
+  };
 
   useEffect(() => {
     const updateId = () => {
@@ -720,6 +814,14 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
       clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    if (currentDiagramId) {
+      joinDiagramRoom(currentDiagramId);
+    } else {
+      leaveDiagramRoom();
+    }
+  }, [currentDiagramId]);
 
   const handleGenerateBackend = async () => {
     const diagramId = currentDiagramId || getActiveDiagramId();
@@ -804,6 +906,157 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
       }
     } finally {
       setIsGeneratingBackend(false);
+    }
+  };
+
+  const handleExportXmi = async () => {
+    const diagramId = currentDiagramId || getActiveDiagramId();
+    if (!diagramId || isExportingXmi) {
+      return;
+    }
+
+    setIsExportingXmi(true);
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/diagrams/${diagramId}/export-xmi`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (response.ok) {
+        let filename = "diagrama.xmi";
+        const disposition = response.headers.get("Content-Disposition");
+        if (disposition) {
+          const match = disposition.match(/filename="?([^";]+)"?/i);
+          if (match && match[1]) {
+            filename = match[1].trim();
+          }
+        }
+
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: "¡XMI exportado y descargado con éxito!",
+            duration: 4000,
+            closable: true,
+          });
+        }
+      } else if (response.status === 400) {
+        let errorMsg =
+          "El diagrama debe tener al menos una clase válida para exportar";
+        try {
+          const data = await response.json();
+          if (data?.error) {
+            errorMsg = data.error;
+          }
+        } catch {
+          // fallback al mensaje por defecto
+        }
+
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: errorMsg,
+            duration: 6000,
+            closable: true,
+          });
+        } else {
+          alert(errorMsg);
+        }
+      } else {
+        const fallbackMsg = "No se pudo exportar a XMI, intenta de nuevo";
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: fallbackMsg,
+            duration: 6000,
+            closable: true,
+          });
+        } else {
+          alert(fallbackMsg);
+        }
+      }
+    } catch (error) {
+      console.error("[exportXmi] Error al exportar a XMI:", error);
+      const fallbackMsg = "No se pudo exportar a XMI, intenta de nuevo";
+      if (excalidrawAPI) {
+        excalidrawAPI.setToast({
+          message: fallbackMsg,
+          duration: 6000,
+          closable: true,
+        });
+      } else {
+        alert(fallbackMsg);
+      }
+    } finally {
+      setIsExportingXmi(false);
+    }
+  };
+
+  const handleImportXmiClick = () => {
+    if (isImportingXmi) {
+      return;
+    }
+    xmiFileInputRef.current?.click();
+  };
+
+  const handleXmiFileSelected = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    // Reiniciar el valor del input inmediatamente para permitir re-selección del mismo archivo
+    event.target.value = "";
+
+    if (!file || !excalidrawAPI || isImportingXmi) {
+      return;
+    }
+
+    setIsImportingXmi(true);
+    try {
+      const xmlText = await file.text();
+      const diagramName =
+        file.name.replace(/\.[^/.]+$/, "").trim() || "Diagrama Importado";
+
+      const result = await importXmiToCanvas(xmlText, excalidrawAPI, {
+        diagramName,
+      });
+
+      const summary = formatImportSummary(result.stats);
+      excalidrawAPI.setToast({
+        message: summary,
+        duration: 5000,
+        closable: true,
+      });
+    } catch (error: any) {
+      console.error("[importXmi] Error al importar XMI:", error);
+      const invalidMsg = "El archivo no es un XMI válido o no contiene clases";
+      const message =
+        error?.message === invalidMsg
+          ? invalidMsg
+          : "No se pudo importar el diagrama. Inténtalo de nuevo";
+
+      if (excalidrawAPI) {
+        excalidrawAPI.setToast({
+          message,
+          duration: 6000,
+          closable: true,
+        });
+      } else {
+        alert(message);
+      }
+    } finally {
+      setIsImportingXmi(false);
     }
   };
 
@@ -1405,13 +1658,14 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
         theme={editorTheme}
         onThemeChange={setAppTheme}
         renderTopRightUI={(isMobile) => {
+          const activeDiagramId = currentDiagramId || getActiveDiagramId();
           return (
             <div
               className="excalidraw-ui-top-right"
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "8px",
+                gap: "6px",
               }}
             >
               <IconButton
@@ -1630,6 +1884,161 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
                   {isGeneratingBackend ? "Generando..." : "Generar Backend"}
                 </span>
               </button>
+              <button
+                type="button"
+                className="export-xmi-button"
+                data-testid="toolbar-export-xmi"
+                disabled={!currentDiagramId || isExportingXmi}
+                onClick={handleExportXmi}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  borderRadius: "8px",
+                  backgroundColor:
+                    !currentDiagramId || isExportingXmi
+                      ? "var(--color-surface-lowest, #f1f3f5)"
+                      : "var(--color-primary, #6965db)",
+                  color:
+                    !currentDiagramId || isExportingXmi
+                      ? "var(--color-text-secondary, #9ca3af)"
+                      : "#ffffff",
+                  border: "1px solid transparent",
+                  cursor:
+                    !currentDiagramId || isExportingXmi
+                      ? "not-allowed"
+                      : "pointer",
+                  transition: "all 0.15s ease",
+                  opacity: !currentDiagramId || isExportingXmi ? 0.6 : 1,
+                  boxShadow:
+                    !currentDiagramId || isExportingXmi
+                      ? "none"
+                      : "0 1px 2px rgba(0, 0, 0, 0.08)",
+                }}
+                title={
+                  !currentDiagramId
+                    ? "Guarda el diagrama primero para exportar a XMI"
+                    : isExportingXmi
+                    ? "Exportando a XMI..."
+                    : "Exportar diagrama a archivo XMI 2.1 (CU10)"
+                }
+              >
+                {isExportingXmi ? (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      animation: "spin 1s linear infinite",
+                    }}
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                )}
+                <span>
+                  {isExportingXmi ? "Exportando..." : "Exportar a XMI"}
+                </span>
+              </button>
+              <input
+                ref={xmiFileInputRef}
+                type="file"
+                accept=".xmi,.xml"
+                style={{ display: "none" }}
+                onChange={handleXmiFileSelected}
+              />
+              <button
+                type="button"
+                className="import-xmi-button"
+                data-testid="toolbar-import-xmi"
+                disabled={isImportingXmi}
+                onClick={handleImportXmiClick}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  borderRadius: "8px",
+                  backgroundColor: isImportingXmi
+                    ? "var(--color-surface-lowest, #f1f3f5)"
+                    : "var(--color-primary, #6965db)",
+                  color: isImportingXmi
+                    ? "var(--color-text-secondary, #9ca3af)"
+                    : "#ffffff",
+                  border: "1px solid transparent",
+                  cursor: isImportingXmi ? "not-allowed" : "pointer",
+                  transition: "all 0.15s ease",
+                  opacity: isImportingXmi ? 0.6 : 1,
+                  boxShadow: isImportingXmi
+                    ? "none"
+                    : "0 1px 2px rgba(0, 0, 0, 0.08)",
+                }}
+                title={
+                  isImportingXmi
+                    ? "Importando diagrama desde XMI..."
+                    : "Importar diagrama desde archivo XMI 2.1 (CU11)"
+                }
+              >
+                {isImportingXmi ? (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      animation: "spin 1s linear infinite",
+                    }}
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                )}
+                <span>
+                  {isImportingXmi ? "Importando..." : "Importar desde XMI"}
+                </span>
+              </button>
               {pendingRelationType && (
                 <div
                   style={{
@@ -1698,6 +2107,149 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
                 </div>
               )}
 
+              <div
+                className="share-diagram-container"
+                ref={sharePopoverRef}
+                style={{ position: "relative", display: "inline-flex" }}
+              >
+                <button
+                  type="button"
+                  className="share-diagram-button"
+                  data-testid="toolbar-share-diagram"
+                  disabled={!activeDiagramId}
+                  onClick={() => {
+                    if (!activeDiagramId) {
+                      return;
+                    }
+                    setIsShareOpen((prev) => !prev);
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "6px 12px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    borderRadius: "8px",
+                    backgroundColor: isShareOpen
+                      ? "var(--color-primary-darker, #504cb8)"
+                      : !activeDiagramId
+                      ? "var(--color-surface-lowest, #f1f3f5)"
+                      : "var(--color-surface-low, #f1f3f5)",
+                    color: isShareOpen
+                      ? "#ffffff"
+                      : !activeDiagramId
+                      ? "var(--color-text-secondary, #9ca3af)"
+                      : "var(--color-on-surface, #212529)",
+                    border: "1px solid var(--color-surface-lowest, #e2e8f0)",
+                    cursor: !activeDiagramId ? "not-allowed" : "pointer",
+                    transition: "all 0.15s ease",
+                    opacity: !activeDiagramId ? 0.6 : 1,
+                  }}
+                  title={
+                    !activeDiagramId
+                      ? "No hay un diagrama activo para compartir"
+                      : "Compartir enlace del diagrama activo"
+                  }
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="18" cy="5" r="3" />
+                    <circle cx="6" cy="12" r="3" />
+                    <circle cx="18" cy="19" r="3" />
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                  </svg>
+                  <span>Compartir</span>
+                </button>
+
+                {isShareOpen && activeDiagramId && (
+                  <div
+                    className="share-diagram-popover"
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 8px)",
+                      right: 0,
+                      backgroundColor: "var(--color-surface-lowest, #ffffff)",
+                      border: "1px solid var(--color-surface-lowest, #e2e8f0)",
+                      borderRadius: "8px",
+                      padding: "12px",
+                      boxShadow:
+                        "0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                      zIndex: 1000,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                      width: "320px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--color-on-surface, #212529)",
+                      }}
+                    >
+                      Compartir enlace del diagrama
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <input
+                        ref={shareInputRef}
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/?diagramId=${activeDiagramId}`}
+                        style={{
+                          flex: 1,
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          borderRadius: "6px",
+                          border: "1px solid var(--color-surface-lowest, #cbd5e1)",
+                          backgroundColor: "var(--color-surface-low, #f8fafc)",
+                          color: "var(--color-on-surface, #334155)",
+                          outline: "none",
+                          userSelect: "all",
+                        }}
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCopyShareUrl}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          borderRadius: "6px",
+                          backgroundColor: isShareCopied
+                            ? "#10b981"
+                            : "var(--color-primary, #6965db)",
+                          color: "#ffffff",
+                          border: "none",
+                          cursor: "pointer",
+                          transition: "background-color 0.2s ease",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {isShareCopied ? "¡Copiado!" : "Copiar"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={onLogout}
@@ -1735,26 +2287,8 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
                 <span>Cerrar sesión</span>
               </button>
 
-              {!isMobile && collabAPI && !isCollabDisabled && (
-                <>
-                  {excalidrawAPI?.getEditorInterface().formFactor ===
-                    "desktop" && (
-                    <ExcalidrawPlusPromoBanner
-                      isSignedIn={isExcalidrawPlusSignedUser}
-                    />
-                  )}
-
-                  {collabError.message && (
-                    <CollabError collabError={collabError} />
-                  )}
-                  <LiveCollaborationTrigger
-                    isCollaborating={isCollaborating}
-                    onSelect={() =>
-                      setShareDialogState({ isOpen: true, type: "share" })
-                    }
-                    editorInterface={editorInterface}
-                  />
-                </>
+              {!isMobile && collabAPI && !isCollabDisabled && collabError.message && (
+                <CollabError collabError={collabError} />
               )}
             </div>
           );
@@ -2076,6 +2610,19 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
             setIsUmlRelationModalOpen(false);
             setEditingUmlRelationElement(null);
           }}
+        />
+      )}
+
+      <AiChatButton
+        isOpen={isAiChatOpen}
+        onClick={() => setIsAiChatOpen((prev) => !prev)}
+      />
+
+      {isAiChatOpen && (
+        <AiChatPanel
+          diagramId={currentDiagramId || getActiveDiagramId()}
+          excalidrawAPI={excalidrawAPI}
+          onClose={() => setIsAiChatOpen(false)}
         />
       )}
     </div>

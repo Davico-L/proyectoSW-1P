@@ -8,6 +8,9 @@ import {
 } from "../services/diagramService";
 import { extractUmlModel } from "../backendGenerator/extractModel";
 import { buildBackendZip } from "../backendGenerator/buildZip";
+import { editDiagramByInstruction, isTimeoutError } from "../services/gemini";
+import { validateAndResolveOperations } from "../services/operationValidator";
+import { generateXmiDocument } from "../xmiExporter/generateXmi";
 
 export const diagramRouter = Router();
 
@@ -170,4 +173,187 @@ diagramRouter.post("/:id/generate-backend", async (req: Request, res: Response):
     res.status(500).json({ error: "Error generando el backend" });
   }
 });
+
+// POST /diagrams/:id/export-xmi: Exportar diagrama a archivo XMI 2.1
+diagramRouter.post("/:id/export-xmi", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "Identificador de diagrama inválido." });
+      return;
+    }
+
+    // 1. Traer el diagrama de Postgres por :id
+    const diagram = await getDiagramById(id);
+    if (!diagram) {
+      res.status(404).json({ error: "Diagrama no encontrado" });
+      return;
+    }
+
+    // 2. Extraer el modelo con extractUmlModel
+    const model = extractUmlModel(diagram.data);
+
+    // 3. Validar que model.classes tenga al menos una clase válida (mismo criterio de CU5)
+    const validClasses = (model?.classes || []).filter(
+      (c) => c.className && c.className.trim() !== ""
+    );
+
+    if (validClasses.length === 0) {
+      res.status(400).json({
+        error: "El diagrama debe tener al menos una clase válida para exportar",
+      });
+      return;
+    }
+
+    // 4. Generar el documento XMI 2.1
+    const xmi = generateXmiDocument({
+      ...model,
+      classes: validClasses,
+    });
+
+    // 5. Devolver como archivo descargable .xmi
+    const rawName = diagram.name && diagram.name.trim() !== "" ? diagram.name.trim() : "diagrama";
+    const safeName = rawName.replace(/[/\\?%*:|"<>]/g, "_");
+    const filename = `${safeName}.xmi`;
+
+    res.setHeader("Content-Type", "application/xml");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(xmi);
+  } catch (error: any) {
+    console.error("[diagramRoutes] Error en POST /diagrams/:id/export-xmi:", error);
+    res.status(500).json({ error: "Error exportando a XMI" });
+  }
+});
+
+// POST /diagrams/:id/ai-edit: Editar diagrama mediante instrucciones en lenguaje natural usando IA
+diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { instruction } = req.body;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "Identificador de diagrama inválido." });
+      return;
+    }
+
+    if (!instruction || typeof instruction !== "string" || instruction.trim() === "") {
+      res.status(400).json({
+        error: "El campo 'instruction' es requerido y debe ser una cadena no vacía.",
+      });
+      return;
+    }
+
+    // 1. Obtener diagrama de la BD por id y llamar a extractUmlModel(diagramData)
+    const diagram = await getDiagramById(id);
+    if (!diagram) {
+      res.status(404).json({ error: "Diagrama no encontrado" });
+      return;
+    }
+
+    const { classes, relations } = extractUmlModel(diagram.data);
+
+    // 2. Transformar relations: mapear sourceClassId/targetClassId a sourceClassName/targetClassName
+    const classMap = new Map<string, string>();
+    for (const c of classes) {
+      classMap.set(c.id, c.className);
+    }
+
+    const transformedRelations = [];
+    for (const rel of relations) {
+      const sourceClassName = classMap.get(rel.sourceClassId);
+      const targetClassName = classMap.get(rel.targetClassId);
+      if (sourceClassName && targetClassName) {
+        transformedRelations.push({
+          relationType: rel.relationType,
+          sourceClassName,
+          targetClassName,
+          multiplicitySource: rel.multiplicitySource,
+          multiplicityTarget: rel.multiplicityTarget,
+        });
+      }
+    }
+
+    // 3. Armar currentModel
+    const currentModel = {
+      classes: classes.map((c) => ({
+        className: c.className,
+        attributes: c.attributes,
+        methods: c.methods,
+      })),
+      relations: transformedRelations,
+    };
+
+    // 4. Llamar a editDiagramByInstruction
+    const result = await editDiagramByInstruction(currentModel, instruction.trim());
+    console.log("[UC7 DEBUG] editDiagramByInstruction OK"); // TEMP UC7 DEBUG
+
+    // 5. Validar y resolver operaciones contra las clases existentes
+    const { validOperations, warnings } = validateAndResolveOperations(
+      result.operations,
+      classes
+    );
+    console.log(`[UC7 DEBUG] Validation OK - validOperations: ${validOperations.length}, warnings: ${warnings.length}`); // TEMP UC7 DEBUG
+
+    console.log("[UC7 DEBUG] Sending HTTP 200"); // TEMP UC7 DEBUG
+    res.status(200).json({ validOperations, warnings });
+  } catch (error: any) {
+    if (error instanceof Error && error.message === "INVALID_AI_RESPONSE") {
+      res.status(422).json({
+        error: "No se pudo interpretar la instrucción, intentá reformularla",
+      });
+      return;
+    }
+
+    if (isTimeoutError(error)) {
+      res.status(504).json({
+        error: "AI_TIMEOUT",
+        message: "El servicio de IA tardó demasiado en responder. Intentá nuevamente.",
+      });
+      return;
+    }
+
+    const statusStr = String(error?.status ?? error?.statusCode ?? error?.code ?? "").toUpperCase();
+    const messageStr = String(error?.message ?? "").toUpperCase();
+    const fullTextStr = String(error).toUpperCase();
+
+    if (
+      statusStr === "429" ||
+      statusStr === "RESOURCE_EXHAUSTED" ||
+      messageStr.includes("429") ||
+      messageStr.includes("RESOURCE_EXHAUSTED") ||
+      messageStr.includes("QUOTA") ||
+      fullTextStr.includes("429") ||
+      fullTextStr.includes("RESOURCE_EXHAUSTED")
+    ) {
+      res.status(429).json({
+        error: "AI_QUOTA_EXCEEDED",
+        message: "Se alcanzó temporalmente el límite de uso del servicio de IA. Intentá nuevamente más tarde.",
+      });
+      return;
+    }
+
+    if (
+      statusStr === "503" ||
+      statusStr === "UNAVAILABLE" ||
+      messageStr.includes("503") ||
+      messageStr.includes("UNAVAILABLE") ||
+      fullTextStr.includes("503") ||
+      fullTextStr.includes("UNAVAILABLE")
+    ) {
+      res.status(503).json({
+        error: "AI_SERVICE_UNAVAILABLE",
+        message: "El servicio de IA está temporalmente saturado. Intentá nuevamente en unos momentos.",
+      });
+      return;
+    }
+
+    console.error("[diagramRoutes] Error en POST /diagrams/:id/ai-edit:", error);
+    res.status(500).json({
+      error: "INTERNAL_SERVER_ERROR",
+      message: "Error interno procesando la edición con IA",
+    });
+  }
+});
+
 

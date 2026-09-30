@@ -17,12 +17,20 @@ export function generateRepositoryInterface(
   const className = toPascalCase(umlClass.className) || "Entity";
   const idType = resolveIdJavaType(umlClass, allClasses, relations);
 
-  return [
-    "package com.example.generatedbackend.repository;",
-    "",
+  const importLines: string[] = [
     `import com.example.generatedbackend.entity.${className};`,
     "import org.springframework.data.jpa.repository.JpaRepository;",
     "import org.springframework.stereotype.Repository;",
+  ];
+
+  if (idType === "LocalDate") {
+    importLines.push("import java.time.LocalDate;");
+  }
+
+  return [
+    "package com.example.generatedbackend.repository;",
+    "",
+    ...importLines,
     "",
     "@Repository",
     `public interface ${className}Repository extends JpaRepository<${className}, ${idType}> {`,

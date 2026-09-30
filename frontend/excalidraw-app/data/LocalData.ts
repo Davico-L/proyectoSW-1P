@@ -103,6 +103,10 @@ export class LocalData {
     this._save.flush();
   };
 
+  static cancelSave = () => {
+    this._save.cancel();
+  };
+
   private static locker = new Locker<SavingLockTypes>();
 
   static pauseSave = (lockType: SavingLockTypes) => {

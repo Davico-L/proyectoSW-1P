@@ -8,6 +8,23 @@ import {
   generateApplicationProperties,
   generateMainApplicationClass,
 } from "./generateProjectFiles";
+import { generatePostmanCollection } from "./generatePostmanCollection";
+
+const DOCKER_COMPOSE_YML = `services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: generated-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: generated_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
+`;
 
 /**
  * Genera en memoria un archivo ZIP con el proyecto completo Spring Boot generado a partir de un modelo UML.
@@ -58,6 +75,12 @@ export function buildBackendZip(model: UmlModel): Promise<Buffer> {
     });
     archive.append(generateMainApplicationClass(), {
       name: "generated-backend/src/main/java/com/example/generatedbackend/GeneratedBackendApplication.java",
+    });
+    archive.append(generatePostmanCollection(model), {
+      name: "generated-backend/postman-collection.json",
+    });
+    archive.append(DOCKER_COMPOSE_YML, {
+      name: "generated-backend/docker-compose.yml",
     });
 
     // Archivos Java por cada clase del diagrama

@@ -1,4 +1,5 @@
 import { io } from "socket.io-client";
+import { debounce } from "@excalidraw/common";
 
 import type { ExcalidrawElement } from "@excalidraw/element/types";
 
@@ -30,7 +31,10 @@ export const joinDiagramRoom = (diagramId: string): void => {
   if (!diagramId) {
     return;
   }
-  if (currentRoomId && currentRoomId !== diagramId) {
+  if (currentRoomId === diagramId) {
+    return;
+  }
+  if (currentRoomId) {
     socket.emit("leave-diagram", { diagramId: currentRoomId });
   }
   socket.emit("join-diagram", { diagramId });
@@ -109,3 +113,14 @@ export const onDiagramState = (
     socket.off("diagram-state", handler);
   };
 };
+
+/**
+ * Emite 'diagram-update' con debounce de 300 ms
+ */
+export const debouncedEmitDiagramUpdate = debounce(
+  (diagramId: string, elements: readonly ExcalidrawElement[]) => {
+    emitDiagramUpdate(diagramId, { elements });
+  },
+  300,
+);
+

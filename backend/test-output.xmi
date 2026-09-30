@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://schema.omg.org/spec/XMI/2.1" xmi:version="2.1" xmlns:uml="http://schema.omg.org/spec/UML/2.1">
+  <uml:Model xmi:type="uml:Model" name="EA_Model" visibility="public">
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg_diagrama" name="Diagrama" visibility="public">
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_persona_1" name="Persona" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" name="id" visibility="private">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Integer"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+        <ownedAttribute xmi:type="uml:Property" name="nombre" visibility="public">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+        <ownedAttribute xmi:type="uml:Property" name="saldo" visibility="protected">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Real"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+        <ownedAttribute xmi:type="uml:Property" name="codigoLargo" visibility="private">
+          <type xmi:idref="dt_long"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+        <ownedAttribute xmi:type="uml:Property" name="fechaNacimiento" visibility="private">
+          <type xmi:idref="dt_date"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+        <ownedOperation name="getNombre" visibility="public">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          <ownedParameter name="return" direction="return">
+            <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          </ownedParameter>
+        </ownedOperation>
+        <ownedOperation name="getCodigoLargo" visibility="public" type="dt_long">
+          <ownedParameter name="return" type="dt_long" direction="return"/>
+        </ownedOperation>
+        <ownedOperation name="reiniciar" visibility="public">
+          <ownedParameter name="return" direction="return"/>
+        </ownedOperation>
+      </packagedElement>
+      <packagedElement xmi:type="uml:DataType" xmi:id="dt_date" name="Date" visibility="public"/>
+      <packagedElement xmi:type="uml:DataType" xmi:id="dt_long" name="Long" visibility="public"/>
+    </packagedElement>
+  </uml:Model>
+</xmi:XMI>

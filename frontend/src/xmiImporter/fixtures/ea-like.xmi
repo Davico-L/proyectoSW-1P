@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://schema.omg.org/spec/XMI/2.1" xmi:version="2.1" xmlns:uml="http://schema.omg.org/spec/UML/2.1">
+  <xmi:Documentation exporter="Enterprise Architect" exporterVersion="6.5"/>
+  <uml:Model xmi:type="uml:Model" name="EA_Model" visibility="public">
+    <packagedElement xmi:type="uml:Package" xmi:id="EAPK_MAIN_01" name="RootPackage" visibility="public">
+      <packagedElement xmi:type="uml:Interface" xmi:id="EAID_INT_001" name="Auditavel" visibility="public"/>
+      <packagedElement xmi:type="uml:Package" xmi:id="EAPK_NESTED_01" name="NestedSubPackage" visibility="public">
+        <packagedElement xmi:type="uml:Class" xmi:id="EAID_CLS_NESTED" name="ClaseIgnoradaPorNivel"/>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="EAID_CLS_001" name="Cliente" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" xmi:id="EAID_ATTR_001" name="nombre" visibility="public">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+        </ownedAttribute>
+        <!-- Extremo de asociación como ownedAttribute dentro de Cliente, sin lowerValue ni upperValue -->
+        <ownedAttribute xmi:type="uml:Property" xmi:id="EAID_END_CLIENTE" name="pedidos" visibility="public" association="EAID_ASSOC_001" aggregation="none"/>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="EAID_CLS_002" name="Pedido" visibility="public">
+        <!-- Herencia hacia Cliente (para validar generalización con EAID_) -->
+        <generalization xmi:type="uml:Generalization" xmi:id="EAID_GEN_001" general="EAID_CLS_001"/>
+        <ownedAttribute xmi:type="uml:Property" xmi:id="EAID_ATTR_002" name="monto" visibility="private">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Real"/>
+        </ownedAttribute>
+        <!-- Extremo de asociación como ownedAttribute dentro de Pedido, sin lowerValue ni upperValue -->
+        <ownedAttribute xmi:type="uml:Property" xmi:id="EAID_END_PEDIDO" name="cliente" visibility="public" association="EAID_ASSOC_001" aggregation="none"/>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Association" xmi:id="EAID_ASSOC_001" visibility="public">
+        <memberEnd xmi:idref="EAID_END_CLIENTE"/>
+        <memberEnd xmi:idref="EAID_END_PEDIDO"/>
+      </packagedElement>
+    </packagedElement>
+  </uml:Model>
+  <xmi:Extension extender="Enterprise Architect" extenderID="6.5">
+    <elements>
+      <element xmi:idref="EAID_CLS_001"/>
+      <element xmi:idref="EAID_CLS_002"/>
+    </elements>
+  </xmi:Extension>
+</xmi:XMI>

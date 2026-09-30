@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://schema.omg.org/spec/XMI/2.1" xmi:version="2.1" xmlns:uml="http://schema.omg.org/spec/UML/2.1">
+  <uml:Model xmi:type="uml:Model" name="EA_Model" visibility="public">
+    <packagedElement xmi:type="uml:Package" xmi:id="pkg_diagrama" name="Diagrama" visibility="public">
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_persona" name="Persona" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" name="id" visibility="private">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Integer"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_estudiante" name="Estudiante" visibility="public">
+        <generalization xmi:type="uml:Generalization" xmi:id="gen_estudiante_persona" general="cls_persona" isSubstitutable="true"/>
+        <ownedAttribute xmi:type="uml:Property" name="matricula" visibility="private">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_colegio" name="Colegio" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" name="nombre" visibility="public">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_aula" name="Aula" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" name="numero" visibility="public">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Integer"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_profesor" name="Profesor" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" name="legajo" visibility="private">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Class" xmi:id="cls_materia" name="Materia" visibility="public">
+        <ownedAttribute xmi:type="uml:Property" name="nombre" visibility="public">
+          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="1"/>
+        </ownedAttribute>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Association" xmi:id="assoc_profesor_materia" visibility="public">
+        <memberEnd xmi:idref="end_assoc_profesor_materia_src"/>
+        <memberEnd xmi:idref="end_assoc_profesor_materia_dst"/>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_profesor_materia_src" visibility="public" association="assoc_profesor_materia" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="none">
+          <type xmi:idref="cls_profesor"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralInteger" value="1"/>
+        </ownedEnd>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_profesor_materia_dst" visibility="public" association="assoc_profesor_materia" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="none">
+          <type xmi:idref="cls_materia"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="0"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="-1"/>
+        </ownedEnd>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Association" xmi:id="assoc_colegio_aula" visibility="public">
+        <memberEnd xmi:idref="end_assoc_colegio_aula_src"/>
+        <memberEnd xmi:idref="end_assoc_colegio_aula_dst"/>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_colegio_aula_src" visibility="public" association="assoc_colegio_aula" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="none">
+          <type xmi:idref="cls_colegio"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralInteger" value="1"/>
+        </ownedEnd>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_colegio_aula_dst" visibility="public" association="assoc_colegio_aula" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="composite">
+          <type xmi:idref="cls_aula"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="-1"/>
+        </ownedEnd>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Association" xmi:id="assoc_profesor_aula" visibility="public">
+        <memberEnd xmi:idref="end_assoc_profesor_aula_src"/>
+        <memberEnd xmi:idref="end_assoc_profesor_aula_dst"/>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_profesor_aula_src" visibility="public" association="assoc_profesor_aula" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="none">
+          <type xmi:idref="cls_profesor"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="0"/>
+          <upperValue xmi:type="uml:LiteralInteger" value="1"/>
+        </ownedEnd>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_profesor_aula_dst" visibility="public" association="assoc_profesor_aula" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="shared">
+          <type xmi:idref="cls_aula"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="0"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="-1"/>
+        </ownedEnd>
+      </packagedElement>
+      <packagedElement xmi:type="uml:Association" xmi:id="assoc_estudiante_materia" visibility="public">
+        <memberEnd xmi:idref="end_assoc_estudiante_materia_src"/>
+        <memberEnd xmi:idref="end_assoc_estudiante_materia_dst"/>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_estudiante_materia_src" visibility="public" association="assoc_estudiante_materia" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="none">
+          <type xmi:idref="cls_estudiante"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="0"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="-1"/>
+        </ownedEnd>
+        <ownedEnd xmi:type="uml:Property" xmi:id="end_assoc_estudiante_materia_dst" visibility="public" association="assoc_estudiante_materia" isStatic="false" isReadOnly="false" isDerived="false" isOrdered="false" isDerivedUnion="false" isUnique="true" aggregation="none">
+          <type xmi:idref="cls_materia"/>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="-1"/>
+        </ownedEnd>
+      </packagedElement>
+    </packagedElement>
+  </uml:Model>
+</xmi:XMI>
