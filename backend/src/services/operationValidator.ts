@@ -35,6 +35,8 @@ export function validateAndResolveOperations(
     return { validOperations, warnings };
   }
 
+  const workingClasses: UmlClass[] = classes.map((c) => ({ ...c }));
+
   for (const op of operations) {
     if (!op || typeof op !== "object" || !op.action) {
       continue;
@@ -43,17 +45,30 @@ export function validateAndResolveOperations(
     switch (op.action) {
       case "createClass": {
         validOperations.push({ ...op });
+        workingClasses.push({
+          id: `pending:${op.className}`,
+          className: op.className,
+          attributes: op.attributes ?? [],
+          methods: op.methods ?? [],
+        });
         break;
       }
 
       case "updateClass":
       case "deleteClass": {
-        const found = findClassByName(classes, op.className);
+        const found = findClassByName(workingClasses, op.className);
         if (found) {
           validOperations.push({
             ...op,
             classId: found.id,
           });
+          if (
+            op.action === "updateClass" &&
+            typeof op.newClassName === "string" &&
+            op.newClassName.trim() !== ""
+          ) {
+            found.className = op.newClassName.trim();
+          }
         } else {
           warnings.push(`No encontré la clase '${op.className}'`);
         }
@@ -63,8 +78,8 @@ export function validateAndResolveOperations(
       case "createRelation":
       case "updateRelation":
       case "deleteRelation": {
-        const sourceClass = findClassByName(classes, op.sourceClassName);
-        const targetClass = findClassByName(classes, op.targetClassName);
+        const sourceClass = findClassByName(workingClasses, op.sourceClassName);
+        const targetClass = findClassByName(workingClasses, op.targetClassName);
 
         let isValid = true;
         if (!sourceClass) {

@@ -9,6 +9,7 @@ import {
 import { extractUmlModel } from "../backendGenerator/extractModel";
 import { buildBackendZip } from "../backendGenerator/buildZip";
 import { editDiagramByInstruction, isTimeoutError } from "../services/gemini";
+import { editDiagramByInstructionGroq } from "../services/groq";
 import { validateAndResolveOperations } from "../services/operationValidator";
 import { generateXmiDocument } from "../xmiExporter/generateXmi";
 
@@ -228,9 +229,15 @@ diagramRouter.post("/:id/export-xmi", async (req: Request, res: Response): Promi
 
 // POST /diagrams/:id/ai-edit: Editar diagrama mediante instrucciones en lenguaje natural usando IA
 diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<void> => {
+  const provider = (process.env.AI_PROVIDER || "groq").toLowerCase();
+  console.log(`[AI-EDIT] Proveedor: ${provider}`);
+
   try {
     const { id } = req.params;
-    const { instruction } = req.body;
+    const { instruction, source } = req.body;
+
+    const isVoice = source === "voice";
+    console.log(`[UC8 DEBUG] AI-edit source: ${isVoice ? "voice" : "text"}`);
 
     if (!id || typeof id !== "string") {
       res.status(400).json({ error: "Identificador de diagrama inválido." });
@@ -284,8 +291,17 @@ diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<
       relations: transformedRelations,
     };
 
-    // 4. Llamar a editDiagramByInstruction
-    const result = await editDiagramByInstruction(currentModel, instruction.trim());
+    // 4. Armar la instrucción a enviar (si es voz, anteponer la nota de robustez fonética)
+    const instructionToSend = isVoice
+      ? "Nota: la siguiente instrucción fue dictada por voz y puede contener errores de transcripción o falta de puntuación. Interpretá 'entero' como Integer, 'texto' o 'cadena' como String, 'decimal' como Double, 'fecha' como Date, 'booleano' o 'verdadero o falso' como Boolean, 'largo' como Long, y emparejá los nombres de clase mal escuchados con las clases existentes si suenan parecido. La nota no es una orden de edición; la instrucción del usuario es solo lo que sigue.\n\nInstrucción: " +
+        instruction.trim()
+      : instruction.trim();
+
+    // 5. Llamar al proveedor de IA configurado
+    const result =
+      provider === "gemini"
+        ? await editDiagramByInstruction(currentModel, instructionToSend)
+        : await editDiagramByInstructionGroq(currentModel, instructionToSend);
     console.log("[UC7 DEBUG] editDiagramByInstruction OK"); // TEMP UC7 DEBUG
 
     // 5. Validar y resolver operaciones contra las clases existentes
@@ -305,7 +321,7 @@ diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<
       return;
     }
 
-    if (isTimeoutError(error)) {
+    if (error?.message === "AI_TIMEOUT" || isTimeoutError(error)) {
       res.status(504).json({
         error: "AI_TIMEOUT",
         message: "El servicio de IA tardó demasiado en responder. Intentá nuevamente.",
@@ -318,6 +334,7 @@ diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<
     const fullTextStr = String(error).toUpperCase();
 
     if (
+      error?.message === "AI_RATE_LIMIT" ||
       statusStr === "429" ||
       statusStr === "RESOURCE_EXHAUSTED" ||
       messageStr.includes("429") ||

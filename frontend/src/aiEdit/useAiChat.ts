@@ -39,7 +39,7 @@ export const useAiChat = ({
   const [inputText, setInputText] = useState("");
 
   const handleSendInstruction = useCallback(
-    async (customText?: string) => {
+    async (customText?: string, options?: { source?: "voice" | "text" }) => {
       const textToSend = (customText ?? inputText).trim();
       if (!textToSend || loading) {
         return;
@@ -73,13 +73,20 @@ export const useAiChat = ({
       }
 
       try {
-        // 3. POST a /diagrams/:id/ai-edit con { instruction }
+        // 3. POST a /diagrams/:id/ai-edit con { instruction, (source si es voice) }
+        const requestBody: { instruction: string; source?: "voice" } = {
+          instruction: textToSend,
+        };
+        if (options?.source === "voice") {
+          requestBody.source = "voice";
+        }
+
         const response = await fetch(`${backendUrl}/diagrams/${diagramId}/ai-edit`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ instruction: textToSend }),
+          body: JSON.stringify(requestBody),
         });
         console.log(`[UC7 DEBUG] HTTP response: ${response.status}`); // TEMP UC7 DEBUG
 
@@ -226,11 +233,27 @@ export const useAiChat = ({
     [backendUrl, diagramId, excalidrawAPI, inputText, loading],
   );
 
+  const addCustomMessage = useCallback(
+    (text: string, variant: MessageVariant = "info", role: MessageRole = "assistant") => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: createMessageId(),
+          role,
+          text,
+          variant,
+        },
+      ]);
+    },
+    [],
+  );
+
   return {
     messages,
     loading,
     inputText,
     setInputText,
     handleSendInstruction,
+    addCustomMessage,
   };
 };

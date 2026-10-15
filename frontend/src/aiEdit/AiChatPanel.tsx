@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useAiChat, type Message } from "./useAiChat";
+import { useSpeechRecognition } from "./useSpeechRecognition";
 import "./AiChat.scss";
 
 export interface AiChatPanelProps {
@@ -22,7 +23,28 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     inputText,
     setInputText,
     handleSendInstruction,
+    addCustomMessage,
   } = useAiChat({ diagramId, excalidrawAPI, backendUrl });
+
+  // Hook de reconocimiento de voz configurado en es-BO
+  const {
+    isSupported,
+    status: speechStatus,
+    interimText,
+    finalText,
+    error: speechError,
+    start: startSpeech,
+    stop: stopSpeech,
+    reset: resetSpeech,
+  } = useSpeechRecognition({ lang: "es-BO" });
+
+  const isListening = speechStatus === "listening";
+
+  // Almacena el texto que tenía el cuadro antes de empezar a dictar
+  const [baseText, setBaseText] = useState<string>("");
+
+  // Indica si el contenido actual proviene de dictado de voz
+  const isVoiceActiveRef = useRef<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -37,17 +59,117 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     textareaRef.current?.focus();
   }, []);
 
+  // Detener la escucha al cerrar el panel
+  const handleClose = () => {
+    if (isListening) {
+      stopSpeech();
+    }
+    resetSpeech();
+    onClose();
+  };
+
+  // Manejo de errores de voz como mensajes en el chat
+  useEffect(() => {
+    if (!speechError) {
+      return;
+    }
+
+    let errorMessageText = "No se pudo iniciar el dictado, intentá de nuevo o escribí la instrucción.";
+    switch (speechError) {
+      case "not-allowed":
+        errorMessageText = "Necesito acceso al micrófono para escucharte. Habilitalo en el navegador.";
+        break;
+      case "no-speech":
+        errorMessageText = "No escuché nada, intentá de nuevo.";
+        break;
+      case "network":
+        errorMessageText = "No se pudo usar el dictado por voz (error de red o navegador no compatible, por ejemplo Brave). Probá en Chrome o Edge, o escribí la instrucción.";
+        break;
+      case "audio-capture":
+        errorMessageText = "No encontré un micrófono disponible.";
+        break;
+      default:
+        errorMessageText = "No se pudo iniciar el dictado, intentá de nuevo o escribí la instrucción.";
+        break;
+    }
+
+    addCustomMessage(errorMessageText, "error");
+  }, [speechError, addCustomMessage]);
+
+  // Manejo de transcripción final: fusionar con baseText y actualizar inputText
+  useEffect(() => {
+    if (finalText) {
+      const combined = baseText
+        ? `${baseText.trim()} ${finalText.trim()}`
+        : finalText.trim();
+      setInputText(combined);
+      isVoiceActiveRef.current = true;
+    }
+  }, [finalText, baseText, setInputText]);
+
+  // Handler para iniciar o detener el dictado con el botón de micrófono
+  const handleToggleVoice = () => {
+    if (loading || !isSupported) {
+      return;
+    }
+
+    if (isListening) {
+      stopSpeech();
+    } else {
+      // Guardar el texto actual como base
+      setBaseText(inputText);
+      resetSpeech();
+      startSpeech();
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+    // Si el cuadro queda vacío, se desactiva el indicador de voz
+    if (val.trim() === "") {
+      isVoiceActiveRef.current = false;
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSendInstruction();
+
+      // Si está escuchando, detener la escucha y NO enviar todavía
+      if (isListening) {
+        stopSpeech();
+        return;
+      }
+
+      const sourceToSend = isVoiceActiveRef.current ? "voice" : "text";
+      isVoiceActiveRef.current = false;
+      resetSpeech();
+      handleSendInstruction(undefined, { source: sourceToSend });
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleSendInstruction();
+
+    // Si está escuchando, detener la escucha y NO enviar todavía
+    if (isListening) {
+      stopSpeech();
+      return;
+    }
+
+    const sourceToSend = isVoiceActiveRef.current ? "voice" : "text";
+    isVoiceActiveRef.current = false;
+    resetSpeech();
+    handleSendInstruction(undefined, { source: sourceToSend });
   };
+
+  // Valor a mostrar en el textarea: mientras escucha con texto parcial, muestra base + parcial
+  const displayValue = isListening && interimText
+    ? baseText
+      ? `${baseText.trim()} ${interimText}`
+      : interimText
+    : inputText;
 
   return (
     <div className="ai-chat-panel" role="dialog" aria-label="Asistente de edición IA">
@@ -68,7 +190,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         <button
           type="button"
           className="ai-chat-close-btn"
-          onClick={onClose}
+          onClick={handleClose}
           aria-label="Cerrar panel de chat"
           title="Cerrar"
         >
@@ -117,22 +239,72 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input de texto con botón de enviar */}
+      {/* Indicador visual de escucha activa */}
+      {isListening && (
+        <div className="ai-chat-voice-status">
+          <div className="ai-chat-voice-dot" />
+          <span>Escuchando…</span>
+        </div>
+      )}
+
+      {/* Input de texto con botón de micrófono y botón de enviar */}
       <form className="ai-chat-input-area" onSubmit={handleSubmit}>
         <textarea
           ref={textareaRef}
           rows={2}
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          value={displayValue}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="Escribí una instrucción (Enter para enviar, Shift+Enter para salto de línea)..."
+          placeholder={
+            isListening
+              ? "Dictá tu instrucción..."
+              : "Escribí una instrucción (Enter para enviar, Shift+Enter para salto de línea)..."
+          }
           disabled={loading}
           aria-label="Instrucción para el asistente"
         />
+
+        {/* Botón de micrófono */}
+        <button
+          type="button"
+          className={`ai-chat-mic-btn ${isListening ? "is-listening" : ""}`}
+          onClick={handleToggleVoice}
+          disabled={loading || !isSupported}
+          title={
+            !isSupported
+              ? "Tu navegador no soporta dictado por voz; usá el chat de texto"
+              : isListening
+              ? "Detener dictado por voz"
+              : "Dictar instrucción por voz"
+          }
+          aria-label={
+            !isSupported
+              ? "Dictado no soportado"
+              : isListening
+              ? "Detener dictado"
+              : "Iniciar dictado por voz"
+          }
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+        </button>
+
+        {/* Botón de enviar */}
         <button
           type="submit"
           className="ai-chat-send-btn"
-          disabled={loading || !inputText.trim()}
+          disabled={loading || !displayValue.trim()}
           title="Enviar instrucción"
           aria-label="Enviar"
         >

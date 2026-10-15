@@ -2,6 +2,7 @@ import {
   newElementWith,
   fixBindingsAfterDeletion,
   isArrowElement,
+  syncInvalidIndices,
 } from "@excalidraw/element";
 import type {
   ExcalidrawElement,
@@ -19,6 +20,8 @@ import type {
   UmlRelationData,
   RelationType,
   Multiplicity,
+  UmlAttribute,
+  UmlMethod,
 } from "../uml/types";
 
 export interface OperationResult {
@@ -58,6 +61,219 @@ function findRelationArrow(
       (sId === targetClassId && tId === sourceClassId)
     );
   });
+}
+
+/**
+ * Busca un elemento de clase UML en la escena.
+ * Primero intenta por id exacto (si existe y no es un id provisional 'pending:...').
+ * Si no lo encuentra por id, busca por nombre de clase (case-insensitive) en customData.className.
+ */
+function findClassElement(
+  elements: readonly ExcalidrawElement[],
+  classId?: string,
+  className?: string,
+): ExcalidrawElement | undefined {
+  if (classId && !classId.startsWith("pending:")) {
+    const byId = elements.find(
+      (el) =>
+        !el.isDeleted &&
+        el.id === classId &&
+        el.customData?.type === "umlClass",
+    );
+    if (byId) return byId;
+  }
+
+  if (className && typeof className === "string" && className.trim() !== "") {
+    const normalizedName = className.trim().toLowerCase();
+    return elements.find(
+      (el) =>
+        !el.isDeleted &&
+        el.customData?.type === "umlClass" &&
+        typeof el.customData?.className === "string" &&
+        el.customData.className.trim().toLowerCase() === normalizedName,
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Fusiona los atributos existentes de una clase con los atributos entrantes (delta).
+ * - La correspondencia se realiza por nombre normalizado (trim y toLowerCase).
+ * - Si el atributo existe, actualiza únicamente las propiedades proporcionadas y válidas (type, visibility).
+ * - Si no existe, agrega el nuevo atributo al final conservando el orden de los existentes.
+ * - Si incomingAttributes es null, undefined, un arreglo vacío o no es un arreglo, conserva los elementos existentes.
+ * - No muta directamente los arreglos ni los objetos originales de currentAttributes.
+ * - No convierte valores null en arreglos vacíos ni sobrescribe propiedades existentes con null o undefined.
+ * - No duplica atributos al repetir una actualización.
+ * - NOTA: La fusión por nombre no permite distinguir automáticamente un renombrado de una adición
+ *   (un atributo renombrado se agregará como uno nuevo y el anterior se conservará, al no existir una operación de renombrado de atributo).
+ */
+export function mergeAttributes(
+  currentAttributes: UmlAttribute[] | undefined,
+  incomingAttributes: any[] | null | undefined,
+): UmlAttribute[] {
+  const base: UmlAttribute[] = Array.isArray(currentAttributes)
+    ? currentAttributes.map((a) => ({ ...a }))
+    : [];
+
+  if (!Array.isArray(incomingAttributes) || incomingAttributes.length === 0) {
+    return base;
+  }
+
+  const result = [...base];
+
+  for (const incoming of incomingAttributes) {
+    if (
+      !incoming ||
+      typeof incoming !== "object" ||
+      typeof incoming.name !== "string"
+    ) {
+      continue;
+    }
+    const trimmedName = incoming.name.trim();
+    const normalizedName = trimmedName.toLowerCase();
+    if (!normalizedName) {
+      continue;
+    }
+
+    const existingIndex = result.findIndex(
+      (a) => a.name && a.name.trim().toLowerCase() === normalizedName,
+    );
+
+    if (existingIndex >= 0) {
+      const existing = result[existingIndex];
+      const updatedType =
+        incoming.type !== undefined &&
+        incoming.type !== null &&
+        typeof incoming.type === "string" &&
+        incoming.type.trim() !== ""
+          ? incoming.type
+          : existing.type;
+      const updatedVisibility =
+        incoming.visibility !== undefined &&
+        incoming.visibility !== null &&
+        typeof incoming.visibility === "string" &&
+        incoming.visibility.trim() !== ""
+          ? incoming.visibility
+          : existing.visibility;
+
+      result[existingIndex] = {
+        name: existing.name,
+        type: updatedType,
+        visibility: updatedVisibility,
+      };
+    } else {
+      result.push({
+        name: trimmedName,
+        type:
+          incoming.type !== undefined &&
+          incoming.type !== null &&
+          typeof incoming.type === "string" &&
+          incoming.type.trim() !== ""
+            ? incoming.type
+            : "String",
+        visibility:
+          incoming.visibility !== undefined &&
+          incoming.visibility !== null &&
+          typeof incoming.visibility === "string" &&
+          incoming.visibility.trim() !== ""
+            ? incoming.visibility
+            : "private",
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Fusiona los métodos existentes de una clase con los métodos entrantes (delta).
+ * - La correspondencia se realiza por nombre normalizado (trim y toLowerCase).
+ * - Si el método existe, actualiza únicamente las propiedades proporcionadas y válidas (returnType, visibility).
+ * - Si no existe, agrega el nuevo método al final conservando el orden de los existentes.
+ * - Si incomingMethods es null, undefined, un arreglo vacío o no es un arreglo, conserva los elementos existentes.
+ * - No muta directamente los arreglos ni los objetos originales de currentMethods.
+ * - No convierte valores null en arreglos vacíos ni sobrescribe propiedades existentes con null o undefined.
+ * - No duplica métodos al repetir una actualización.
+ * - NOTA: La fusión por nombre no permite distinguir automáticamente un renombrado de una adición.
+ */
+export function mergeMethods(
+  currentMethods: UmlMethod[] | undefined,
+  incomingMethods: any[] | null | undefined,
+): UmlMethod[] {
+  const base: UmlMethod[] = Array.isArray(currentMethods)
+    ? currentMethods.map((m) => ({ ...m }))
+    : [];
+
+  if (!Array.isArray(incomingMethods) || incomingMethods.length === 0) {
+    return base;
+  }
+
+  const result = [...base];
+
+  for (const incoming of incomingMethods) {
+    if (
+      !incoming ||
+      typeof incoming !== "object" ||
+      typeof incoming.name !== "string"
+    ) {
+      continue;
+    }
+    const trimmedName = incoming.name.trim();
+    const normalizedName = trimmedName.toLowerCase();
+    if (!normalizedName) {
+      continue;
+    }
+
+    const existingIndex = result.findIndex(
+      (m) => m.name && m.name.trim().toLowerCase() === normalizedName,
+    );
+
+    if (existingIndex >= 0) {
+      const existing = result[existingIndex];
+      const updatedReturnType =
+        incoming.returnType !== undefined &&
+        incoming.returnType !== null &&
+        typeof incoming.returnType === "string" &&
+        incoming.returnType.trim() !== ""
+          ? incoming.returnType
+          : existing.returnType;
+      const updatedVisibility =
+        incoming.visibility !== undefined &&
+        incoming.visibility !== null &&
+        typeof incoming.visibility === "string" &&
+        incoming.visibility.trim() !== ""
+          ? incoming.visibility
+          : existing.visibility;
+
+      result[existingIndex] = {
+        name: existing.name,
+        returnType: updatedReturnType,
+        visibility: updatedVisibility,
+      };
+    } else {
+      result.push({
+        name: trimmedName,
+        returnType:
+          incoming.returnType !== undefined &&
+          incoming.returnType !== null &&
+          typeof incoming.returnType === "string" &&
+          incoming.returnType.trim() !== ""
+            ? incoming.returnType
+            : "void",
+        visibility:
+          incoming.visibility !== undefined &&
+          incoming.visibility !== null &&
+          typeof incoming.visibility === "string" &&
+          incoming.visibility.trim() !== ""
+            ? incoming.visibility
+            : "public",
+      });
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -115,7 +331,11 @@ export function applyAiOperations(
         });
 
         excalidrawAPI.updateScene({
-          elements: [...excalidrawAPI.getSceneElements(), container, text],
+          elements: syncInvalidIndices([
+            ...excalidrawAPI.getSceneElements(),
+            container,
+            text,
+          ]),
           captureUpdate: CaptureUpdateAction.IMMEDIATELY,
         });
 
@@ -131,11 +351,10 @@ export function applyAiOperations(
 
       case "updateClass": {
         const allElements = excalidrawAPI.getSceneElements();
-        const container = allElements.find(
-          (el) =>
-            !el.isDeleted &&
-            el.id === operation.classId &&
-            el.customData?.type === "umlClass",
+        const container = findClassElement(
+          allElements,
+          operation.classId,
+          operation.className,
         );
 
         if (!container) {
@@ -159,20 +378,24 @@ export function applyAiOperations(
           : null;
 
         const currentData = container.customData as UmlClassData;
+        const currentAttributes = Array.isArray(currentData?.attributes)
+          ? currentData.attributes
+          : [];
+        const currentMethods = Array.isArray(currentData?.methods)
+          ? currentData.methods
+          : [];
+
+        const newClassName =
+          typeof operation.newClassName === "string" &&
+          operation.newClassName.trim() !== ""
+            ? operation.newClassName.trim()
+            : operation.className ?? currentData.className;
+
         const newData: UmlClassData = {
           type: "umlClass",
-          className:
-            operation.newClassName ??
-            operation.className ??
-            currentData.className,
-          attributes:
-            operation.attributes !== undefined
-              ? operation.attributes
-              : currentData.attributes,
-          methods:
-            operation.methods !== undefined
-              ? operation.methods
-              : currentData.methods,
+          className: newClassName,
+          attributes: mergeAttributes(currentAttributes, operation.attributes),
+          methods: mergeMethods(currentMethods, operation.methods),
         };
 
         updateUmlClassElement(container, textElement, newData, excalidrawAPI);
@@ -189,11 +412,10 @@ export function applyAiOperations(
 
       case "deleteClass": {
         const allElements = excalidrawAPI.getSceneElements();
-        const targetClass = allElements.find(
-          (el) =>
-            !el.isDeleted &&
-            el.id === operation.classId &&
-            el.customData?.type === "umlClass",
+        const targetClass = findClassElement(
+          allElements,
+          operation.classId,
+          operation.className,
         );
 
         if (!targetClass) {
@@ -278,11 +500,15 @@ export function applyAiOperations(
 
       case "createRelation": {
         const allElements = excalidrawAPI.getSceneElements();
-        const source = allElements.find(
-          (el) => !el.isDeleted && el.id === operation.sourceClassId,
+        const source = findClassElement(
+          allElements,
+          operation.sourceClassId,
+          operation.sourceClassName,
         );
-        const target = allElements.find(
-          (el) => !el.isDeleted && el.id === operation.targetClassId,
+        const target = findClassElement(
+          allElements,
+          operation.targetClassId,
+          operation.targetClassName,
         );
 
         if (!source || !target) {
@@ -328,10 +554,33 @@ export function applyAiOperations(
 
       case "updateRelation": {
         const allElements = excalidrawAPI.getSceneElements();
-        const arrow = findRelationArrow(
+        const source = findClassElement(
           allElements,
           operation.sourceClassId,
+          operation.sourceClassName,
+        );
+        const target = findClassElement(
+          allElements,
           operation.targetClassId,
+          operation.targetClassName,
+        );
+
+        if (!source || !target) {
+          results.push({
+            action: "updateRelation",
+            sourceClassName: operation.sourceClassName,
+            targetClassName: operation.targetClassName,
+            description: `Relación ${operation.sourceClassName || "origen"}-${operation.targetClassName || "destino"}`,
+            status: "skipped",
+            reason: "elemento no encontrado en el lienzo",
+          });
+          break;
+        }
+
+        const arrow = findRelationArrow(
+          allElements,
+          source.id,
+          target.id,
         );
 
         if (!arrow) {
@@ -382,14 +631,18 @@ export function applyAiOperations(
 
           // Recrear flecha con el nuevo relationType
           const refreshedElements = excalidrawAPI.getSceneElements();
-          const source = refreshedElements.find(
-            (el) => !el.isDeleted && el.id === operation.sourceClassId,
+          const refreshedSource = findClassElement(
+            refreshedElements,
+            operation.sourceClassId,
+            operation.sourceClassName,
           );
-          const target = refreshedElements.find(
-            (el) => !el.isDeleted && el.id === operation.targetClassId,
+          const refreshedTarget = findClassElement(
+            refreshedElements,
+            operation.targetClassId,
+            operation.targetClassName,
           );
 
-          if (!source || !target) {
+          if (!refreshedSource || !refreshedTarget) {
             results.push({
               action: "updateRelation",
               sourceClassName: operation.sourceClassName,
@@ -402,8 +655,8 @@ export function applyAiOperations(
           }
 
           const newArrow = createUmlRelationElement(
-            source,
-            target,
+            refreshedSource,
+            refreshedTarget,
             operation.relationType,
             excalidrawAPI,
           );
@@ -470,10 +723,33 @@ export function applyAiOperations(
 
       case "deleteRelation": {
         const allElements = excalidrawAPI.getSceneElements();
-        const arrow = findRelationArrow(
+        const source = findClassElement(
           allElements,
           operation.sourceClassId,
+          operation.sourceClassName,
+        );
+        const target = findClassElement(
+          allElements,
           operation.targetClassId,
+          operation.targetClassName,
+        );
+
+        if (!source || !target) {
+          results.push({
+            action: "deleteRelation",
+            sourceClassName: operation.sourceClassName,
+            targetClassName: operation.targetClassName,
+            description: `Relación ${operation.sourceClassName || "origen"}-${operation.targetClassName || "destino"}`,
+            status: "skipped",
+            reason: "elemento no encontrado en el lienzo",
+          });
+          break;
+        }
+
+        const arrow = findRelationArrow(
+          allElements,
+          source.id,
+          target.id,
         );
 
         if (!arrow) {

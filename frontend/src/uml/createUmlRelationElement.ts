@@ -1,4 +1,8 @@
-import { newArrowElement, newElementWith } from "@excalidraw/element";
+import {
+  newArrowElement,
+  newElementWith,
+  syncInvalidIndices,
+} from "@excalidraw/element";
 import type {
   ExcalidrawElement,
   FixedPointBinding,
@@ -186,7 +190,7 @@ export function createUmlRelationElement(
   });
 
   excalidrawAPI.updateScene({
-    elements: [...nextElements, arrow],
+    elements: syncInvalidIndices([...nextElements, arrow]),
     captureUpdate: CaptureUpdateAction.IMMEDIATELY,
   });
 
