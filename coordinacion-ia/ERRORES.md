@@ -18,4 +18,11 @@ Este documento registra los errores técnicos, bloqueos, problemas de integraci�
 
 ## Historial de Errores
 
-*(No hay incidentes ni errores registrados en esta fase inicial de inicialización documental).*
+### [ERR-001] Incompatibilidad de tipos en thinkingLevel (TS2322)
+- **Fecha**: 2026-10-17
+- **Componente / Módulo Afectado**: Backend / `backend/src/services/visionDiagram.ts`
+- **Descripción**: Error de compilación TypeScript `error TS2322: Type '{ thinkingLevel: string; }' is not assignable to type 'ThinkingConfig'. Type 'string' is not assignable to type 'ThinkingLevel | undefined'.`
+- **Causa Raíz**: El SDK `@google/genai` expone `ThinkingLevel` como un TypeScript `enum` estricto (`ThinkingLevel.MINIMAL`, `ThinkingLevel.LOW`, etc.) y rechaza tipos `string` primitivos en `thinkingConfig.thinkingLevel`.
+- **Solución / Mitigación**: Se importó `ThinkingLevel` directamente desde `@google/genai` y se tipó la función `getThinkingLevelForModel` devolviendo `ThinkingLevel | null` mapeando los strings permitidos hacia los valores correspondientes del enum.
+- **Estado**: Resuelto
+

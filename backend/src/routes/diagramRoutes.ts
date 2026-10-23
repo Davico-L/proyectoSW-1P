@@ -12,6 +12,7 @@ import { editDiagramByInstruction, isTimeoutError } from "../services/gemini";
 import { editDiagramByInstructionGroq } from "../services/groq";
 import { validateAndResolveOperations } from "../services/operationValidator";
 import { generateXmiDocument } from "../xmiExporter/generateXmi";
+import { handleAiFromImage } from "./aiVisionRoutes";
 
 export const diagramRouter = Router();
 
@@ -226,6 +227,9 @@ diagramRouter.post("/:id/export-xmi", async (req: Request, res: Response): Promi
     res.status(500).json({ error: "Error exportando a XMI" });
   }
 });
+
+// POST /diagrams/:id/ai-from-image: Generar operaciones UML a partir de imagen (UC9)
+diagramRouter.post("/:id/ai-from-image", handleAiFromImage);
 
 // POST /diagrams/:id/ai-edit: Editar diagrama mediante instrucciones en lenguaje natural usando IA
 diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<void> => {

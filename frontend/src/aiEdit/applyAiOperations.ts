@@ -15,13 +15,14 @@ import { createUmlClassElement } from "../uml/createUmlClassElement";
 import { updateUmlClassElement } from "../uml/updateUmlClassElement";
 import { createUmlRelationElement } from "../uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../uml/updateUmlRelationElement";
-import type {
-  UmlClassData,
-  UmlRelationData,
-  RelationType,
-  Multiplicity,
-  UmlAttribute,
-  UmlMethod,
+import {
+  buildUmlClassLabel,
+  type UmlClassData,
+  type UmlRelationData,
+  type RelationType,
+  type Multiplicity,
+  type UmlAttribute,
+  type UmlMethod,
 } from "../uml/types";
 
 export interface OperationResult {
@@ -290,11 +291,38 @@ export function applyAiOperations(
 ): ApplyAiOperationsResult {
   const results: OperationResult[] = [];
   let appliedCount = 0;
-  let createdClassOffset = 0;
 
   if (!Array.isArray(validOperations) || validOperations.length === 0) {
     return { applied: 0, results: [] };
   }
+
+  // Pre-cálculo para distribución en cuadrícula de createClass
+  const createClassOps = validOperations.filter(
+    (op) => op && typeof op === "object" && op.action === "createClass",
+  );
+  const totalCreateClasses = createClassOps.length;
+
+  const estimateClassCardHeight = (op: any): number => {
+    const data: UmlClassData = {
+      type: "umlClass",
+      className: op.className,
+      attributes: op.attributes ?? [],
+      methods: op.methods ?? [],
+    };
+    const lines = buildUmlClassLabel(data).split("\n");
+    return Math.max(140, lines.length * 22 + 40);
+  };
+
+  const maxCardHeight =
+    totalCreateClasses > 0
+      ? Math.max(...createClassOps.map(estimateClassCardHeight))
+      : 140;
+
+  const stepX = 250;
+  const stepY = maxCardHeight + 60;
+  const cols = Math.min(totalCreateClasses, 4);
+  const rows = Math.ceil(totalCreateClasses / 4);
+  let createdClassIndex = 0;
 
   for (const operation of validOperations) {
     if (!operation || typeof operation !== "object" || !operation.action) {
@@ -311,23 +339,28 @@ export function applyAiOperations(
         };
 
         const appState = excalidrawAPI.getAppState();
-        const offset = createdClassOffset * 15;
-        createdClassOffset += 1;
 
         const centerX =
           (appState.width / 2 - (appState.offsetLeft || 0)) /
             appState.zoom.value -
-          appState.scrollX +
-          offset;
+          appState.scrollX;
         const centerY =
           (appState.height / 2 - (appState.offsetTop || 0)) /
             appState.zoom.value -
-          appState.scrollY +
-          offset;
+          appState.scrollY;
+
+        const i = createdClassIndex;
+        createdClassIndex += 1;
+
+        const col = i % 4;
+        const row = Math.floor(i / 4);
+
+        const x = centerX + (col - (cols - 1) / 2) * stepX;
+        const y = centerY + (row - (rows - 1) / 2) * stepY;
 
         const { container, text } = createUmlClassElement(data, {
-          x: centerX,
-          y: centerY,
+          x,
+          y,
         });
 
         excalidrawAPI.updateScene({

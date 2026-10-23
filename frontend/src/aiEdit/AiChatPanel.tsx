@@ -23,6 +23,9 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     inputText,
     setInputText,
     handleSendInstruction,
+    handleSendImage,
+    handleRetryImage,
+    loadingMessage,
     addCustomMessage,
   } = useAiChat({ diagramId, excalidrawAPI, backendUrl });
 
@@ -39,6 +42,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   } = useSpeechRecognition({ lang: "es-BO" });
 
   const isListening = speechStatus === "listening";
+
+  // Estado local para adjuntar imagen y mensajes de validación
+  const [attachedImage, setAttachedImage] = useState<{
+    file: File;
+    previewUrl: string;
+  } | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+
+  const previewUrlRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Almacena el texto que tenía el cuadro antes de empezar a dictar
   const [baseText, setBaseText] = useState<string>("");
@@ -58,6 +71,110 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Liberar URL de vista previa al desmontar el componente
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  // Constantes de validación para imágenes
+  const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  const MAX_IMAGE_SIZE = 15 * 1024 * 1024; // 15 MB
+
+  const validateAndAttachFile = (file: File) => {
+    const isMimeValid = ALLOWED_MIME_TYPES.includes(file.type) || file.type === "image/jpg";
+    const isExtValid = /\.(jpe?g|png|webp)$/i.test(file.name);
+
+    if (!isMimeValid && !isExtValid) {
+      setAttachError("Elegí una imagen JPG, PNG o WEBP");
+      return;
+    }
+
+    if (file.size > MAX_IMAGE_SIZE) {
+      setAttachError("La imagen pesa demasiado (máx. 15 MB)");
+      return;
+    }
+
+    // Revocar URL previa si existe
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    previewUrlRef.current = previewUrl;
+    setAttachedImage({ file, previewUrl });
+    setAttachError(null);
+  };
+
+  const handleRemoveImage = () => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setAttachedImage(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleAttachClick = () => {
+    if (loading) {
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    validateAndAttachFile(file);
+    e.target.value = "";
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    let imageFile: File | null = null;
+
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            imageFile = file;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!imageFile && e.clipboardData?.files) {
+      for (let i = 0; i < e.clipboardData.files.length; i++) {
+        const file = e.clipboardData.files[i];
+        if (file.type.startsWith("image/")) {
+          imageFile = file;
+          break;
+        }
+      }
+    }
+
+    if (imageFile) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!loading) {
+        validateAndAttachFile(imageFile);
+      }
+    }
+  };
 
   // Detener la escucha al cerrar el panel
   const handleClose = () => {
@@ -142,6 +259,15 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         return;
       }
 
+      if (attachedImage) {
+        const fileToSend = attachedImage.file;
+        const textToSend = inputText;
+        handleRemoveImage();
+        setInputText("");
+        handleSendImage(fileToSend, textToSend);
+        return;
+      }
+
       const sourceToSend = isVoiceActiveRef.current ? "voice" : "text";
       isVoiceActiveRef.current = false;
       resetSpeech();
@@ -155,6 +281,15 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     // Si está escuchando, detener la escucha y NO enviar todavía
     if (isListening) {
       stopSpeech();
+      return;
+    }
+
+    if (attachedImage) {
+      const fileToSend = attachedImage.file;
+      const textToSend = inputText;
+      handleRemoveImage();
+      setInputText("");
+      handleSendImage(fileToSend, textToSend);
       return;
     }
 
@@ -210,9 +345,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
 
       {/* Lista de mensajes */}
       <div className="ai-chat-messages">
-        {messages.map((msg: Message) => {
+        {messages.map((msg: Message, index: number) => {
           const isUser = msg.role === "user";
           const variantClass = !isUser && msg.variant ? `variant-${msg.variant}` : "variant-info";
+          const isLastMessage = index === messages.length - 1;
+          const showRetry = isLastMessage && !isUser && msg.retryable && !loading;
 
           return (
             <div
@@ -221,7 +358,41 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                 isUser ? "ai-chat-msg--user" : `ai-chat-msg--assistant ${variantClass}`
               }`}
             >
-              {msg.text}
+              {isUser && msg.imageUrl && (
+                <div className="ai-chat-msg-image">
+                  <img
+                    src={msg.imageUrl}
+                    alt="Miniatura adjunta"
+                    className="ai-chat-msg-thumb"
+                  />
+                </div>
+              )}
+              <div className="ai-chat-msg-text">{msg.text}</div>
+              {showRetry && (
+                <div className="ai-chat-msg-actions">
+                  <button
+                    type="button"
+                    className="ai-chat-retry-btn"
+                    onClick={handleRetryImage}
+                    disabled={loading}
+                    title="Reintentar procesamiento de la imagen"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="23 4 23 10 17 10" />
+                      <polyline points="1 20 1 14 7 14" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                    <span>Reintentar</span>
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -231,7 +402,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           <div className="ai-chat-msg ai-chat-msg--assistant variant-info">
             <div className="ai-chat-loading-indicator">
               <div className="ai-chat-spinner" />
-              <span>Pensando...</span>
+              <span>{loadingMessage || "Pensando..."}</span>
             </div>
           </div>
         )}
@@ -247,7 +418,47 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         </div>
       )}
 
-      {/* Input de texto con botón de micrófono y botón de enviar */}
+      {/* Vista previa de imagen adjunta y/o error de validación */}
+      {(attachedImage || attachError) && (
+        <div className="ai-chat-attach-preview-container">
+          {attachError && (
+            <div className="ai-chat-attach-error" role="alert">
+              {attachError}
+            </div>
+          )}
+          {attachedImage && (
+            <div className="ai-chat-attach-preview">
+              <img
+                src={attachedImage.previewUrl}
+                alt={attachedImage.file.name || "Miniatura de imagen adjunta"}
+                className="ai-chat-attach-thumb"
+              />
+              <button
+                type="button"
+                className="ai-chat-attach-remove-btn"
+                onClick={handleRemoveImage}
+                disabled={loading}
+                title="Quitar imagen"
+                aria-label="Quitar imagen adjunta"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Input de texto con botones de acción */}
       <form className="ai-chat-input-area" onSubmit={handleSubmit}>
         <textarea
           ref={textareaRef}
@@ -255,6 +466,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           value={displayValue}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={
             isListening
               ? "Dictá tu instrucción..."
@@ -263,6 +475,38 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           disabled={loading}
           aria-label="Instrucción para el asistente"
         />
+
+        {/* Input de archivo oculto para adjuntar imagen (sin atributo capture para permitir cámara o galería) */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: "none" }}
+          onChange={handleFileInputChange}
+          disabled={loading}
+          tabIndex={-1}
+        />
+
+        {/* Botón de adjuntar imagen */}
+        <button
+          type="button"
+          className="ai-chat-attach-btn"
+          onClick={handleAttachClick}
+          disabled={loading}
+          title="Adjuntar imagen (JPG, PNG o WEBP)"
+          aria-label="Adjuntar imagen"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
 
         {/* Botón de micrófono */}
         <button
@@ -304,7 +548,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         <button
           type="submit"
           className="ai-chat-send-btn"
-          disabled={loading || !displayValue.trim()}
+          disabled={loading || (!displayValue.trim() && !attachedImage)}
           title="Enviar instrucción"
           aria-label="Enviar"
         >
