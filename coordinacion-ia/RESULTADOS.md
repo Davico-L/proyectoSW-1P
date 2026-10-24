@@ -160,3 +160,42 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 
 
 
+
+---
+
+### [RES-015] Botón "Mis diagramas" en el menú del lienzo (CU-Auth Fase 4b)
+- **Fecha**: 2026-10-24
+- **Archivos Modificados**:
+  - `frontend/excalidraw-app/components/AppMainMenu.tsx`: Prop `onOpenDiagrams?: () => void` y renderizado del ítem "Mis diagramas" con `<MainMenu.Separator />` antes de "Cerrar sesión".
+  - `frontend/excalidraw-app/App.tsx`: Importación de `saveDiagramToBackend` y `SessionExpiredError`. `ExcalidrawWrapper` pasa `onOpenDiagrams` con `excalidrawAPI`. `ExcalidrawApp` implementa `handleReturnToDiagrams(api)` en el orden estricto solicitado (guardar diagrama, flush y abandono de sala realtime, reseteo de escena, cancelación de timers y sync state, purga de IndexedDB de archivos y claves de diagrama en localStorage preservando sesión y username, y retorno a DiagramsScreen).
+- **Archivos NO Modificados**: `handleLogout`, `backendSync.ts`, `realtimeSync.ts`, `DiagramsScreen.tsx`, ni backend.
+- **Pruebas Ejecutadas**:
+  - `yarn test:typecheck` (`tsc`): código de salida 0.
+  - `npx vitest run LoginScreen importXmiToCanvas`: 8/8 pruebas pasadas.
+  - `yarn build`: código de salida 0 (`✓ built in 1m 2s`).
+
+---
+
+### [RES-016] Reconciliación de elementos remotos en tiempo real con reconcileElements (CU-Collab Fase C2)
+- **Fecha**: 2026-10-24
+- **Archivos Modificados**:
+  - `frontend/excalidraw-app/App.tsx`: En `applyRemoteChange` se calculó la fusión de elementos con `reconcileElements(excalidrawAPI.getSceneElementsIncludingDeleted(), elements as readonly RemoteExcalidrawElement[], excalidrawAPI.getAppState())` antes de entregarlos a `excalidrawAPI.updateScene({ elements: reconciledElements, captureUpdate: CaptureUpdateAction.NEVER })`. Se conservaron intactos `isApplyingRemoteChange.current` y el bloque `try/catch/finally`.
+- **Archivos NO Modificados**: `realtimeSync.ts`, `backendSync.ts`, `Collab.tsx`, backend.
+- **Origen de importación**: `reconcileElements` ya se encontraba importado desde `"@excalidraw/excalidraw"` (mismo paquete y export que utiliza `Collab.tsx`) y `RemoteExcalidrawElement` desde `"@excalidraw/excalidraw/data/reconcile"`.
+- **Pruebas Ejecutadas**:
+  - `yarn test:typecheck` (`tsc`): código de salida 0.
+  - `npx vitest run LoginScreen importXmiToCanvas`: 8/8 pruebas pasadas.
+  - `yarn build`: código de salida 0 (`✓ built in 1m 1s`).
+
+---
+
+### [RES-017] Deshabilitación de endpoint POST /session respondiendo 410 Gone (CU-Auth Fase 5b)
+- **Fecha**: 2026-10-24
+- **Archivos Modificados**:
+  - `backend/src/routes/sessionRoutes.ts`: Reemplazado el handler de `POST /` para responder HTTP 410 Gone con mensaje de deprecación indicando el uso de `POST /auth/login` o `POST /auth/register`. Se removió el import no utilizado de `createSession`.
+  - `backend/src/app.ts`: Actualizado el texto informativo de `endpoints` en la ruta raíz `GET /` reflejando validación con `GET /session/:id` y autenticación en `/auth`.
+- **Archivos NO Modificados**: `GET /session/:id`, `sessionService.ts`, `authService.ts`, `authRoutes.ts`, frontend.
+- **Pruebas Ejecutadas**:
+  - Backend typecheck (`npm run typecheck`): código de salida 0.
+  - Backend build (`npm run build`): código de salida 0.
+  - Frontend vitest (`npx vitest run LoginScreen importXmiToCanvas`): 8/8 pruebas pasadas.

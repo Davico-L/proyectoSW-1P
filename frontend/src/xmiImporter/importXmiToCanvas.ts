@@ -17,6 +17,7 @@ import {
   getActiveDiagramId,
   setActiveDiagramId,
   saveDiagramToBackend,
+  SessionExpiredError,
 } from "../../excalidraw-app/data/backendSync";
 import { LocalData } from "../../excalidraw-app/data/LocalData";
 import { debouncedEmitDiagramUpdate } from "../../excalidraw-app/data/realtimeSync";
@@ -200,7 +201,17 @@ export async function importXmiToCanvas(
     } catch {}
 
     // (6) Crear el nuevo diagrama B en el servidor vía POST con los elementos ya generados
-    const sessionId = await getOrCreateSessionId();
+    let sessionId: string;
+    try {
+      sessionId = await getOrCreateSessionId();
+    } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        throw new Error(
+          "Tu sesión ha expirado. Por favor, inicia sesión nuevamente.",
+        );
+      }
+      throw err;
+    }
     const diagramName = options?.diagramName?.trim() || "Diagrama Importado";
     const finalElements = excalidrawAPI.getSceneElements();
     const nonDeletedFinalElements = getNonDeletedElements(finalElements);

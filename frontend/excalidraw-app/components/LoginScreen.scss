@@ -188,6 +188,33 @@
           animation: loginSpin 0.7s linear infinite;
         }
       }
+
+      .login-mode-switch {
+        text-align: center;
+        font-size: 13px;
+        color: #64748b;
+        margin-top: 4px;
+
+        .login-mode-btn {
+          background: none;
+          border: none;
+          color: #2563eb;
+          font-weight: 600;
+          font-size: 13px;
+          cursor: pointer;
+          padding: 0;
+          text-decoration: underline;
+
+          &:hover:not(:disabled) {
+            color: #1d4ed8;
+          }
+
+          &:disabled {
+            color: #94a3b8;
+            cursor: not-allowed;
+          }
+        }
+      }
     }
   }
 }

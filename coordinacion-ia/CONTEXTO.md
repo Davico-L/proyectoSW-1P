@@ -56,7 +56,7 @@ D:\proyectoSW-1P\
 
 ### 2.4. Base de Datos (PostgreSQL)
 - **Tablas Principales**:
-  - `sessions`: `id` (UUID, PK), `username` (VARCHAR(255)), `created_at` (TIMESTAMP).
+  - `sessions`: `id` (UUID, PK), `username` (VARCHAR(255)), `password_hash` (TEXT, bcryptjs), `created_at` (TIMESTAMP). Índice único `idx_sessions_username_lower` sobre `lower(username)` para garantizar nombres únicos case-insensitive. Script de deduplicación previo `src/db/deduplicateSessions.ts`.
   - `diagrams`: `id` (UUID, PK), `session_id` (UUID, FK a `sessions`), `name` (VARCHAR(255)), `data` (JSONB con `elements`, `appState`, `files`), `created_at`, `updated_at`.
 - **Migraciones**: Script automatizado `src/db/migrate.ts` que ejecuta `src/db/init.sql` al arranque o por comando manual `npm run migrate`.
 
@@ -67,8 +67,10 @@ D:\proyectoSW-1P\
 | Método | Endpoint | Descripción | Componente Responsable |
 |---|---|---|---|
 | `GET` | `/health` | Sondeo activo `SELECT 1` a PostgreSQL | `healthRoutes.ts` |
-| `POST` | `/session` | Creación de sesión ligera por `{ username }` | `sessionRoutes.ts` |
-| `GET` | `/session/:id` | Consulta de existencia de sesión | `sessionRoutes.ts` |
+| `POST` | `/auth/register` | Registro de nuevo usuario con contraseña (devuelve `session_id` y `username`) | `authRoutes.ts` / `authService.ts` |
+| `POST` | `/auth/login` | Inicio de sesión con contraseña o reclamo de cuenta previa (devuelve `session_id` y `username`) | `authRoutes.ts` / `authService.ts` |
+| `POST` | `/session` | Deprecado (responde 410 Gone indicando usar `/auth`) | `sessionRoutes.ts` |
+| `GET` | `/session/:id` | Consulta y validación de existencia de sesión | `sessionRoutes.ts` |
 | `POST` | `/diagrams` | Creación y guardado de un nuevo diagrama | `diagramRoutes.ts` |
 | `GET` | `/diagrams?session_id=UUID` | Listado de diagramas por sesión | `diagramRoutes.ts` |
 | `GET` | `/diagrams/:id` | Recuperación de un diagrama por ID | `diagramRoutes.ts` |

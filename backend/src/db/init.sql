@@ -21,3 +21,12 @@ CREATE TABLE IF NOT EXISTS diagrams (
 -- Índices para optimizar búsquedas por sesión y fecha de modificación
 CREATE INDEX IF NOT EXISTS idx_diagrams_session_id ON diagrams(session_id);
 CREATE INDEX IF NOT EXISTS idx_diagrams_updated_at ON diagrams(updated_at DESC);
+
+-- Migración: columna de contraseña en sessions (nullable, para no romper sesiones existentes)
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+-- Índice único sobre lower(username) para unicidad case-insensitive.
+-- NOTA: en bases existentes con duplicados, ejecutar primero:
+--   tsx src/db/deduplicateSessions.ts --apply
+-- Este CREATE INDEX fallará si aún hay duplicados (lo cual es el comportamiento deseado).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_username_lower ON sessions (lower(username));

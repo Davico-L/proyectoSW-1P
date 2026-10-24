@@ -24,7 +24,7 @@
 
 ## ADR 003: Gestión Ligera de Sesión (Sin Autenticación Completa)
 
-- **Estado**: Aceptado
+- **Estado**: Reemplazado por ADR 007
 - **Fecha**: 2026-09-08
 - **Contexto**: Para las fases iniciales del proyecto y pruebas de integración con el lienzo, no se requiere un sistema de login/contraseñas complejo.
 - **Decisión**:
@@ -95,3 +95,35 @@ local en blur/hidden) y la carga inicial vía GET /diagrams/:id.
 **Estado de Conexión 1 (Frontend ↔ Backend):** ✅ Completa y verificada 
 manualmente (persistencia real en Supabase, carga tras recarga y cierre 
 de navegador, sin pérdida de datos al cambiar de foco).
+
+---
+
+## ADR 007: Autenticación con Usuario y Contraseña, Creación Explícita de Diagramas y Deprecación de POST /session
+
+- **Estado**: Aceptado
+- **Fecha**: 2026-10-24
+- **Reemplaza a**: ADR 003
+- **Contexto**:
+  El esquema de sesión ligera temporal de ADR 003 (`POST /session` recibiendo solo `{ username }`) permitió avanzar en la persistencia básica, pero introdujo problemas estructurales con la llegada de la colaboración y el uso continuo:
+  1. Fuga de sesiones y carreras de guardado: si un usuario dibujaba y cerraba sesión dentro de la ventana de debounce (300–600 ms), el temporizador se ejecutaba tras el borrado de claves, creaba una sesión silenciosa anónima ("usuario_web") y dejaba un diagrama huérfano que pisaba el espacio del siguiente usuario.
+  2. Nombres de usuario no protegidos: colisiones de nombres con diferente o igual capitalización al no existir contraseñas ni índices únicos formales.
+  3. Acoplamiento entre autenticación y lienzo: no existía una pantalla para elegir o crear diagramas explícitamente antes de abrir el lienzo.
+- **Decisión**:
+  1. **Evolución de la tabla `sessions` a cuentas de usuario**:
+     - Se añadió la columna `password_hash TEXT` con hashing seguro mediante `bcryptjs` (costo 10).
+     - Se estableció unicidad estricta y case-insensitive mediante el índice único `idx_sessions_username_lower` sobre `lower(username)` en PostgreSQL, tras saneamiento con el script `src/db/deduplicateSessions.ts`.
+     - Se implementaron los endpoints `POST /auth/register` y `POST /auth/login` (ambos devuelven `{ session_id, username }`).
+     - **Reclamo de cuentas legacy**: Los usuarios previos creados bajo ADR 003 sin contraseña pueden reclamar su cuenta en su primer login exitoso con una contraseña válida (mínimo 6 caracteres), actualizando `password_hash` atómicamente.
+  2. **Deprecación de `POST /session`**:
+     - El endpoint `POST /session` queda deprecado respondiendo HTTP `410 Gone` con mensaje descriptivo hacia `/auth`.
+     - Se preserva `GET /session/:id` exclusivamente para validar la existencia y vigencia de sesiones activas.
+  3. **Flujo de diagramas desacoplado en el cliente**:
+     - Se integró la pantalla intermedia "Mis diagramas" (`DiagramsScreen`) tras el login, permitiendo listar los diagramas del usuario (`GET /diagrams?session_id=...`) o crear uno nuevo explícitamente (`POST /diagrams`) antes de montar Excalidraw.
+     - Se incorporó la opción "Mis diagramas" en el menú principal del lienzo (`AppMainMenu.tsx`) para retornar a la lista guardando cambios, abandonando la sala colaborativa y limpiando el estado local sin cerrar la sesión.
+  4. **Protección de sesión y cierre limpio**:
+     - Cualquier sesión faltante o respuesta 404 del backend redirige al login sin crear sesiones anónimas de fallback.
+     - `handleLogout` cancela temporizadores diferidos pendientes, resetea la escena y purga el almacenamiento IndexedDB antes de eliminar las claves de sesión.
+- **Consecuencias**:
+  - Elimina definitivamente las carreras de persistencia entre cierres e inicios de sesión y el fallback no deseado a "usuario_web".
+  - Proporciona un control de acceso con contraseñas seguras y nombres únicos garantizados por base de datos.
+  - Reemplaza en su totalidad la política de sesión ligera de ADR 003 manteniendo total retrocompatibilidad con las sesiones existentes.

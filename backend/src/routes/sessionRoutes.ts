@@ -1,21 +1,14 @@
 import { Router, Request, Response } from "express";
-import { createSession, getSession } from "../services/sessionService";
+import { getSession } from "../services/sessionService";
 
 export const sessionRouter = Router();
 
-// POST /session: Crear una nueva sesión
-sessionRouter.post("/", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const rawUsername = typeof req.body?.username === "string" ? req.body.username : undefined;
-    const session = await createSession(rawUsername);
-    res.status(201).json(session);
-  } catch (error: any) {
-    console.error("[sessionRoutes] Error en POST /session:", error);
-    res.status(500).json({
-      error: "Error interno al crear la sesión en la base de datos.",
-      details: error?.message,
-    });
-  }
+// POST /session: Deprecado (deshabilitado en favor de /auth)
+sessionRouter.post("/", (_req: Request, res: Response): void => {
+  res.status(410).json({
+    error:
+      "El endpoint POST /session ha sido deprecado. Utilice POST /auth/login o POST /auth/register.",
+  });
 });
 
 // GET /session/:sessionId: Obtener información de una sesión por ID

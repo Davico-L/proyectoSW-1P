@@ -6,14 +6,20 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
-- **Identificador**: TSK-010
-- **Nombre**: CU9 Fase 3d: Botón Reintentar y errores específicos para el flujo de imágenes
-- **Fecha de Inicio**: 2026-10-22
+- **Identificador**: TSK-023
+- **Nombre**: CU-Auth Fase 5b: Deshabilitar POST /session respondiendo HTTP 410 Gone
+- **Fecha de Inicio**: 2026-10-24
 - **Estado**: Completada
-- **Objetivo**: Implementar reintento y manejo de errores específico para el flujo de imágenes:
-  - Cambios estrictamente aditivos en `useAiChat.ts`: agregar `retryable?: boolean` a `Message`, ref síncrono `inFlightRef`, ref de última carga procesada `{ imageBase64, mimeType, instruction, imageUrl }`, función `handleRetryImage()`, indicador de carga dinámico (`loadingMessage` o similar, "Leyendo la imagen... (puede tardar hasta 1 minuto)"), y mensajes de error específicos con `retryable: true` o `false`.
-  - En `AiChatPanel.tsx`: mostrar botón "Reintentar" solo en el último mensaje de la lista si es del asistente con `retryable === true` y `loading === false`, y reflejar el texto del indicador de carga dinámico.
-  - En `AiChat.scss`: estilos para el botón de reintento.
+- **Objetivo**: Modificar ÚNICAMENTE sessionRoutes.ts y app.ts (texto informativo). En sessionRoutes.ts responder 410 Gone en POST / con mensaje claro. En app.ts actualizar endpoints en GET / a GET /session/:id y /auth. Typecheck, build y pruebas de backend limpios.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-022
+- **Nombre**: CU-Collab Fase C2: Reconciliación de elementos remotos en App.tsx con reconcileElements
+- **Fecha de Inicio**: 2026-10-24
+- **Estado**: Completada
 
 ---
 

@@ -121,12 +121,18 @@ import {
   getActiveDiagramId,
   setActiveDiagramId,
   loadDiagramFromBackend,
+  saveDiagramToBackend,
+  SessionExpiredError,
   ACTIVE_DIAGRAM_KEY,
   ACTIVE_SESSION_KEY,
   ACTIVE_USERNAME_KEY,
   BACKEND_URL,
+  debouncedSaveDiagramToBackend,
+  resetBackendSyncState,
 } from "./data/backendSync";
+import { createStore, clear as clearIdbStore } from "idb-keyval";
 import { LoginScreen } from "./components/LoginScreen";
+import { DiagramsScreen } from "./components/DiagramsScreen";
 import {
   joinDiagramRoom,
   leaveDiagramRoom,
@@ -414,8 +420,27 @@ const initializeScene = async (opts: {
   return { scene: null, isExternalScene: false };
 };
 
-const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
+const ExcalidrawWrapper = ({
+  onLogout,
+  onOpenDiagrams,
+  excalidrawAPIRef,
+}: {
+  onLogout: (api?: ExcalidrawImperativeAPI | null) => void;
+  onOpenDiagrams?: (api?: ExcalidrawImperativeAPI | null) => void;
+  excalidrawAPIRef?: React.MutableRefObject<ExcalidrawImperativeAPI | null>;
+}) => {
   const excalidrawAPI = useExcalidrawAPI();
+
+  useEffect(() => {
+    if (excalidrawAPIRef) {
+      excalidrawAPIRef.current = excalidrawAPI;
+    }
+    return () => {
+      if (excalidrawAPIRef) {
+        excalidrawAPIRef.current = null;
+      }
+    };
+  }, [excalidrawAPI, excalidrawAPIRef]);
 
   useEffect(() => {
     if (excalidrawAPI && import.meta.env.DEV) {
@@ -1072,8 +1097,13 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
 
       isApplyingRemoteChange.current = true;
       try {
+        const reconciledElements = reconcileElements(
+          excalidrawAPI.getSceneElementsIncludingDeleted(),
+          elements as readonly RemoteExcalidrawElement[],
+          excalidrawAPI.getAppState(),
+        );
         excalidrawAPI.updateScene({
-          elements,
+          elements: reconciledElements,
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       } catch (err) {
@@ -2251,7 +2281,7 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
 
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={() => onLogout(excalidrawAPI)}
                 className="session-logout-button"
                 style={{
                   display: "inline-flex",
@@ -2309,7 +2339,10 @@ const ExcalidrawWrapper = ({ onLogout }: { onLogout: () => void }) => {
           isCollabEnabled={!isCollabDisabled}
           theme={appTheme}
           refresh={() => forceRefresh((prev) => !prev)}
-          onLogout={onLogout}
+          onOpenDiagrams={
+            onOpenDiagrams ? () => onOpenDiagrams(excalidrawAPI) : undefined
+          }
+          onLogout={() => onLogout(excalidrawAPI)}
         />
         <AppWelcomeScreen
           onCollabDialogOpen={onCollabDialogOpen}
@@ -2637,6 +2670,10 @@ const ExcalidrawApp = () => {
     }
   });
 
+  const [activeDiagramId, setActiveDiagramIdState] = useState<string | null>(
+    () => getActiveDiagramId(),
+  );
+
   const isCloudExportWindow =
     window.location.pathname === "/excalidraw-plus-export";
   if (isCloudExportWindow) {
@@ -2647,13 +2684,116 @@ const ExcalidrawApp = () => {
     setSessionId(newSessionId);
   };
 
-  const handleLogout = () => {
+  const handleOpenDiagram = (id: string) => {
+    setActiveDiagramId(id);
+    setActiveDiagramIdState(id);
+  };
+
+  const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null);
+
+  const handleReturnToDiagrams = async (
+    api?: ExcalidrawImperativeAPI | null,
+  ) => {
+    const apiToUse = api ?? excalidrawAPIRef.current;
+
+    // a. Si api existe: guardar en backend
+    if (apiToUse) {
+      try {
+        await saveDiagramToBackend(
+          apiToUse.getSceneElements(),
+          apiToUse.getAppState(),
+          apiToUse.getFiles() || {},
+        );
+      } catch (err) {
+        if (err instanceof SessionExpiredError) {
+          return;
+        }
+        const confirmExit = window.confirm(
+          "No se pudo guardar el último cambio. ¿Salir de todos modos?",
+        );
+        if (!confirmExit) {
+          return;
+        }
+      }
+    }
+
+    // b. Vacía el envío en tiempo real pendiente y llama a leaveDiagramRoom()
+    if (typeof (debouncedEmitDiagramUpdate as any).flush === "function") {
+      (debouncedEmitDiagramUpdate as any).flush();
+    } else {
+      debouncedEmitDiagramUpdate.cancel();
+    }
+    leaveDiagramRoom();
+
+    // c. Si api existe: api.resetScene()
+    if (apiToUse) {
+      try {
+        apiToUse.resetScene();
+      } catch (sceneErr) {
+        console.warn("[App] Error al resetear escena:", sceneErr);
+      }
+    }
+
+    // d. Cancela temporizadores y resetea sync
+    debouncedSaveDiagramToBackend.cancel();
+    LocalData.cancelSave();
+    resetBackendSyncState();
+
+    // e. Limpia los archivos binarios (LocalData.fileStorage.reset() y vaciado de files-db / files-store)
     try {
+      const filesStore = createStore("files-db", "files-store");
+      clearIdbStore(filesStore).catch((err) => {
+        console.warn(
+          "[App] Error al limpiar almacén IndexedDB de archivos:",
+          err,
+        );
+      });
+      LocalData.fileStorage.reset();
+    } catch (fileStorageErr) {
+      console.warn(
+        "[App] Error al limpiar fileStorage al volver a diagramas:",
+        fileStorageErr,
+      );
+    }
+
+    // f. Borra claves del diagrama y limpia la URL (sin borrar sesión ni username)
+    localStorage.removeItem(ACTIVE_DIAGRAM_KEY);
+    localStorage.removeItem(STORAGE_KEYS.LOCAL_STORAGE_ELEMENTS); // "excalidraw"
+    localStorage.removeItem(STORAGE_KEYS.LOCAL_STORAGE_APP_STATE); // "excalidraw-state"
+    setActiveDiagramId(null);
+
+    // g. Por último, actualizar estado para mostrar DiagramsScreen
+    setActiveDiagramIdState(null);
+  };
+
+  const handleLogout = (api?: ExcalidrawImperativeAPI | null) => {
+    const apiToReset = api ?? excalidrawAPIRef.current;
+    try {
+      // a. Cancelar debouncedEmitDiagramUpdate (ya se hace hoy, mantenerlo)
       debouncedEmitDiagramUpdate.cancel();
 
       // Abandonar la sala activa de Socket.IO
       leaveDiagramRoom();
 
+      // b. debouncedSaveDiagramToBackend.cancel()
+      debouncedSaveDiagramToBackend.cancel();
+
+      // c. LocalData.cancelSave()
+      LocalData.cancelSave();
+
+      // d. resetBackendSyncState()
+      resetBackendSyncState();
+
+      // e. Si excalidrawAPI existe, excalidrawAPI.resetScene()
+      if (apiToReset) {
+        try {
+          apiToReset.resetScene();
+        } catch (sceneErr) {
+          console.warn("[App] Error al resetear escena en logout:", sceneErr);
+        }
+      }
+
+      // f. Después, el borrado de claves que ya hace hoy
       // Limpiar claves de sesión de usuario
       localStorage.removeItem(ACTIVE_SESSION_KEY);
       localStorage.removeItem(ACTIVE_USERNAME_KEY);
@@ -2673,11 +2813,53 @@ const ExcalidrawApp = () => {
       // 3. Limpiar claves de caché local de Excalidraw para evitar trazos residuales
       localStorage.removeItem(STORAGE_KEYS.LOCAL_STORAGE_ELEMENTS); // "excalidraw"
       localStorage.removeItem(STORAGE_KEYS.LOCAL_STORAGE_APP_STATE); // "excalidraw-state"
+
+      // g. Limpia SOLO el almacén de archivos binarios de LocalData.fileStorage (files-db / files-store en IndexedDB)
+      try {
+        const filesStore = createStore("files-db", "files-store");
+        clearIdbStore(filesStore).catch((err) => {
+          console.warn(
+            "[App] Error al limpiar almacén IndexedDB de archivos:",
+            err,
+          );
+        });
+        LocalData.fileStorage.reset();
+      } catch (fileStorageErr) {
+        console.warn(
+          "[App] Error al limpiar fileStorage en logout:",
+          fileStorageErr,
+        );
+      }
     } catch (err) {
       console.warn("[App] Error al limpiar almacenamiento en logout:", err);
     }
     setSessionId(null);
+    setActiveDiagramIdState(null);
   };
+
+  // Escuchar evento global de sesión inválida y redirigir al login
+  useEffect(() => {
+    const onSessionInvalid = () => handleLogout();
+    window.addEventListener("session-invalid", onSessionInvalid);
+    return () => {
+      window.removeEventListener("session-invalid", onSessionInvalid);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Validar al montar que la sesión almacenada existe en el backend
+  useEffect(() => {
+    if (!sessionId) return;
+    fetch(`${BACKEND_URL}/session/${sessionId}`)
+      .then((res) => {
+        if (res.status === 404) {
+          handleLogout();
+        }
+        // 5xx o cualquier otro estado: backend no disponible, no hacer nada
+      })
+      .catch(() => {
+        // Error de red: no invalidar la sesión
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!sessionId) {
     return (
@@ -2687,11 +2869,34 @@ const ExcalidrawApp = () => {
     );
   }
 
+  if (!activeDiagramId) {
+    const currentUsername = (() => {
+      try {
+        return localStorage.getItem(ACTIVE_USERNAME_KEY) || "";
+      } catch {
+        return "";
+      }
+    })();
+    return (
+      <TopErrorBoundary>
+        <DiagramsScreen
+          username={currentUsername}
+          onOpenDiagram={handleOpenDiagram}
+          onLogout={handleLogout}
+        />
+      </TopErrorBoundary>
+    );
+  }
+
   return (
     <TopErrorBoundary>
       <Provider store={appJotaiStore}>
         <ExcalidrawAPIProvider>
-          <ExcalidrawWrapper onLogout={handleLogout} />
+          <ExcalidrawWrapper
+            onOpenDiagrams={handleReturnToDiagrams}
+            onLogout={handleLogout}
+            excalidrawAPIRef={excalidrawAPIRef}
+          />
         </ExcalidrawAPIProvider>
       </Provider>
     </TopErrorBoundary>

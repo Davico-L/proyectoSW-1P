@@ -11,7 +11,10 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -21,41 +24,72 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       return;
     }
 
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      setErrorMessage("El nombre de usuario no puede estar vacío.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMessage("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    if (isRegisterMode && password !== confirmPassword) {
+      setErrorMessage("Las contraseñas no coinciden.");
+      return;
+    }
+
     setLoading(true);
     setErrorMessage(null);
 
+    const endpoint = isRegisterMode
+      ? `${BACKEND_URL}/auth/register`
+      : `${BACKEND_URL}/auth/login`;
+
     try {
-      const response = await fetch(`${BACKEND_URL}/session`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          username: username.trim(),
+          username: trimmedUsername,
+          password,
         }),
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Usuario o contraseña incorrectos");
+        }
+        if (response.status === 409) {
+          throw new Error("Ese usuario ya existe");
+        }
         const errorBody = await response.json().catch(() => ({}));
+        if (response.status === 400 && errorBody.error) {
+          throw new Error(errorBody.error);
+        }
         throw new Error(
           errorBody.error ||
-            `Error al crear la sesión (Status: ${response.status})`,
+            `Error al ${isRegisterMode ? "crear la cuenta" : "iniciar sesión"} (Status: ${response.status})`,
         );
       }
 
-      const data: { sessionId: string; username: string; createdAt: string } =
+      const data: { session_id?: string; sessionId?: string; username: string } =
         await response.json();
+      const resolvedSessionId = (data.session_id || data.sessionId) as string;
 
       // Guardar en localStorage
       try {
-        localStorage.setItem(ACTIVE_SESSION_KEY, data.sessionId);
+        localStorage.setItem(ACTIVE_SESSION_KEY, resolvedSessionId);
         localStorage.setItem(ACTIVE_USERNAME_KEY, data.username);
       } catch (storageErr) {
         console.warn("No se pudo guardar la sesión en localStorage:", storageErr);
       }
 
       // Notificar éxito para redirigir al lienzo
-      onLoginSuccess(data.sessionId, data.username);
+      onLoginSuccess(resolvedSessionId, data.username);
     } catch (err: any) {
       console.error("[LoginScreen] Error de conexión o autenticación:", err);
       setErrorMessage(
@@ -67,6 +101,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleMode = () => {
+    setIsRegisterMode((prev) => !prev);
+    setErrorMessage(null);
   };
 
   return (
@@ -136,18 +175,54 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               id="username-input"
               type="text"
               className="login-input"
-              placeholder="Ej. Ana Gómez (opcional)"
+              placeholder="Ej. Ana Gómez"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
               autoFocus
-              autoComplete="nickname"
-              aria-describedby="username-helper"
+              autoComplete="username"
             />
-            <p id="username-helper" className="helper-text">
-              Si lo dejas vacío, se te asignará un nombre de invitado.
-            </p>
           </div>
+
+          <div className="form-group">
+            <label htmlFor="password-input" className="form-label">
+              Contraseña
+            </label>
+            <input
+              id="password-input"
+              type="password"
+              className="login-input"
+              placeholder="Mínimo 6 caracteres"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+              autoComplete={isRegisterMode ? "new-password" : "current-password"}
+              aria-describedby={!isRegisterMode ? "password-helper" : undefined}
+            />
+            {!isRegisterMode && (
+              <p id="password-helper" className="helper-text">
+                Si tu cuenta es anterior y aún no tiene contraseña, la que escribas quedará registrada
+              </p>
+            )}
+          </div>
+
+          {isRegisterMode && (
+            <div className="form-group">
+              <label htmlFor="confirm-password-input" className="form-label">
+                Repetir contraseña
+              </label>
+              <input
+                id="confirm-password-input"
+                type="password"
+                className="login-input"
+                placeholder="Repite la contraseña"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={loading}
+                autoComplete="new-password"
+              />
+            </div>
+          )}
 
           <div
             className="error-container"
@@ -185,11 +260,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             {loading ? (
               <>
                 <span className="spinner" aria-hidden="true" />
-                <span>Entrando...</span>
+                <span>{isRegisterMode ? "Creando cuenta..." : "Iniciando sesión..."}</span>
               </>
             ) : (
               <>
-                <span>Entrar</span>
+                <span>{isRegisterMode ? "Crear cuenta" : "Iniciar sesión"}</span>
                 <svg
                   width="16"
                   height="16"
@@ -207,6 +282,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               </>
             )}
           </button>
+
+          <div className="login-mode-switch">
+            <span>
+              {isRegisterMode ? "¿Ya tienes una cuenta?" : "¿No tienes una cuenta?"}
+            </span>{" "}
+            <button
+              type="button"
+              className="login-mode-btn"
+              onClick={toggleMode}
+              disabled={loading}
+            >
+              {isRegisterMode ? "Iniciar sesión" : "Crear cuenta"}
+            </button>
+          </div>
         </form>
       </main>
     </div>

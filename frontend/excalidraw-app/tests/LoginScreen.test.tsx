@@ -12,7 +12,7 @@ describe("LoginScreen Component", () => {
     localStorage.clear();
   });
 
-  it("renders tool brand name, subtitle, input, and Enter button", () => {
+  it("renders tool brand name, subtitle, inputs, and submit button", () => {
     render(<LoginScreen onLoginSuccess={onLoginSuccessMock} />);
 
     // Brand and header
@@ -27,23 +27,30 @@ describe("LoginScreen Component", () => {
     expect(screen.queryByText(/Gestión de Sesión/i)).not.toBeInTheDocument();
 
     // Form elements
-    const input = screen.getByLabelText("Nombre de usuario");
-    expect(input).toBeInTheDocument();
-    expect(input).toHaveAttribute("placeholder", "Ej. Ana Gómez (opcional)");
+    const usernameInput = screen.getByLabelText("Nombre de usuario");
+    expect(usernameInput).toBeInTheDocument();
+    expect(usernameInput).toHaveAttribute("placeholder", "Ej. Ana Gómez");
+
+    const passwordInput = screen.getByLabelText("Contraseña");
+    expect(passwordInput).toBeInTheDocument();
+    expect(passwordInput).toHaveAttribute("type", "password");
+
     expect(
-      screen.getByText("Si lo dejas vacío, se te asignará un nombre de invitado."),
+      screen.getByText("Si tu cuenta es anterior y aún no tiene contraseña, la que escribas quedará registrada"),
     ).toBeInTheDocument();
 
-    const submitBtn = screen.getByRole("button", { name: /entrar/i });
+    const submitBtn = screen.getByRole("button", { name: /iniciar sesión/i });
     expect(submitBtn).toBeInTheDocument();
     expect(submitBtn).not.toBeDisabled();
+
+    const toggleBtn = screen.getByRole("button", { name: /crear cuenta/i });
+    expect(toggleBtn).toBeInTheDocument();
   });
 
-  it("submits empty username and assigns guest session successfully", async () => {
+  it("submits login with username and password successfully", async () => {
     const fakeSession = {
-      sessionId: "session-1234",
-      username: "Invitado-5678",
-      createdAt: new Date().toISOString(),
+      session_id: "session-1234",
+      username: "Ana Gómez",
     };
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
@@ -53,31 +60,37 @@ describe("LoginScreen Component", () => {
 
     render(<LoginScreen onLoginSuccess={onLoginSuccessMock} />);
 
-    const submitBtn = screen.getByRole("button", { name: /entrar/i });
+    fireEvent.change(screen.getByLabelText("Nombre de usuario"), {
+      target: { value: "Ana Gómez" },
+    });
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "secreto123" },
+    });
+
+    const submitBtn = screen.getByRole("button", { name: /iniciar sesión/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(`${BACKEND_URL}/session`, {
+      expect(fetchSpy).toHaveBeenCalledWith(`${BACKEND_URL}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username: "" }),
+        body: JSON.stringify({ username: "Ana Gómez", password: "secreto123" }),
       });
     });
 
     await waitFor(() => {
-      expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe(fakeSession.sessionId);
+      expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe(fakeSession.session_id);
       expect(localStorage.getItem(ACTIVE_USERNAME_KEY)).toBe(fakeSession.username);
-      expect(onLoginSuccessMock).toHaveBeenCalledWith(fakeSession.sessionId, fakeSession.username);
+      expect(onLoginSuccessMock).toHaveBeenCalledWith(fakeSession.session_id, fakeSession.username);
     });
   });
 
   it("submits typed username on Enter key press", async () => {
     const fakeSession = {
-      sessionId: "session-custom-99",
+      session_id: "session-custom-99",
       username: "Carlos Developer",
-      createdAt: new Date().toISOString(),
     };
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
@@ -89,17 +102,20 @@ describe("LoginScreen Component", () => {
 
     const input = screen.getByLabelText("Nombre de usuario");
     fireEvent.change(input, { target: { value: "Carlos Developer" } });
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "password123" },
+    });
 
     // Submit via form submit / Enter
     fireEvent.submit(input.closest("form")!);
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(`${BACKEND_URL}/session`, {
+      expect(fetchSpy).toHaveBeenCalledWith(`${BACKEND_URL}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username: "Carlos Developer" }),
+        body: JSON.stringify({ username: "Carlos Developer", password: "password123" }),
       });
     });
 
@@ -111,17 +127,24 @@ describe("LoginScreen Component", () => {
   it("shows error alert with aria-live when login request fails", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: false,
-      status: 500,
-      json: async () => ({ error: "Error interno del servidor" }),
+      status: 401,
+      json: async () => ({ error: "Credenciales incorrectas." }),
     } as Response);
 
     render(<LoginScreen onLoginSuccess={onLoginSuccessMock} />);
 
-    const submitBtn = screen.getByRole("button", { name: /entrar/i });
+    fireEvent.change(screen.getByLabelText("Nombre de usuario"), {
+      target: { value: "Carlos" },
+    });
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "password123" },
+    });
+
+    const submitBtn = screen.getByRole("button", { name: /iniciar sesión/i });
     fireEvent.click(submitBtn);
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Error interno del servidor");
+    expect(alert).toHaveTextContent("Usuario o contraseña incorrectos");
     expect(onLoginSuccessMock).not.toHaveBeenCalled();
   });
 
@@ -130,7 +153,14 @@ describe("LoginScreen Component", () => {
 
     render(<LoginScreen onLoginSuccess={onLoginSuccessMock} />);
 
-    const submitBtn = screen.getByRole("button", { name: /entrar/i });
+    fireEvent.change(screen.getByLabelText("Nombre de usuario"), {
+      target: { value: "Carlos" },
+    });
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "password123" },
+    });
+
+    const submitBtn = screen.getByRole("button", { name: /iniciar sesión/i });
     fireEvent.click(submitBtn);
 
     const alert = await screen.findByRole("alert");

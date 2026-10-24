@@ -23,6 +23,7 @@ export const AppMainMenu: React.FC<{
   theme: Theme | "system";
   refresh: () => void;
   onLogout?: () => void;
+  onOpenDiagrams?: () => void;
 }> = React.memo((props) => {
   const { t } = useI18n();
   return (
@@ -85,9 +86,17 @@ export const AppMainMenu: React.FC<{
         <LanguageList style={{ width: "100%" }} />
       </MainMenu.ItemCustom>
       <MainMenu.DefaultItems.ChangeCanvasBackground />
-      {props.onLogout && (
+      {props.onOpenDiagrams && (
         <>
           <MainMenu.Separator />
+          <MainMenu.Item onSelect={props.onOpenDiagrams}>
+            Mis diagramas
+          </MainMenu.Item>
+        </>
+      )}
+      {props.onLogout && (
+        <>
+          {!props.onOpenDiagrams && <MainMenu.Separator />}
           <MainMenu.Item
             icon={
               <svg

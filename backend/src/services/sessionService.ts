@@ -25,15 +25,17 @@ const escapeForLike = (value: string): string => {
 };
 
 /**
- * Resuelve un nombre único en la tabla sessions.
- * Si baseName ya existe en alguna fila, genera sufijos como "Juan (2)", "Juan (3)", etc.
+ * Resuelve un nombre único en la tabla sessions ignorando mayúsculas (case-insensitive).
+ * Utiliza lower() para comparar, de modo que no viole el índice único
+ * idx_sessions_username_lower. Genera sufijos "Juan (2)", "Juan (3)", etc.
  */
 const resolveUniqueUsername = async (baseName: string): Promise<string> => {
-  const escapedBase = escapeForLike(baseName);
+  const escapedBase = escapeForLike(baseName.toLowerCase());
   const pattern = `${escapedBase} (%)`;
 
+  // Comparamos en minúsculas tanto el nombre base como los sufijos con patrón LIKE.
   const result = await pool.query(
-    "SELECT username FROM sessions WHERE username = $1 OR username LIKE $2 ESCAPE '\\'",
+    "SELECT username FROM sessions WHERE lower(username) = lower($1) OR lower(username) LIKE $2 ESCAPE '\\'",
     [baseName, pattern]
   );
 
@@ -41,16 +43,19 @@ const resolveUniqueUsername = async (baseName: string): Promise<string> => {
     return baseName;
   }
 
-  const existingNames = new Set<string>(result.rows.map((row: any) => row.username));
+  // Normalizar a minúsculas para comparar sin importar capitalización.
+  const existingNamesLower = new Set<string>(
+    result.rows.map((row: any) => (row.username as string).toLowerCase())
+  );
 
-  // Si el nombre base no existe aún, se puede usar directamente
-  if (!existingNames.has(baseName)) {
+  // Si el nombre base no existe aún (case-insensitive), se puede usar directamente.
+  if (!existingNamesLower.has(baseName.toLowerCase())) {
     return baseName;
   }
 
   // Si ya existe, buscar el siguiente sufijo numérico disponible: (2), (3), ...
   let counter = 2;
-  while (existingNames.has(`${baseName} (${counter})`)) {
+  while (existingNamesLower.has(`${baseName.toLowerCase()} (${counter})`)) {
     counter++;
   }
 
@@ -77,7 +82,20 @@ export const createSession = async (username?: string | null): Promise<Session> 
     RETURNING id, username, created_at
   `;
 
-  const result = await pool.query(queryText, [sessionId, finalUsername, now]);
+  // Intento principal de INSERT. Si el índice único rechaza por colisión de
+  // carrera (error 23505), reintentamos con el siguiente sufijo disponible.
+  let result;
+  try {
+    result = await pool.query(queryText, [sessionId, finalUsername, now]);
+  } catch (err: any) {
+    if (err?.code === "23505") {
+      // Colisión de unicidad (condición de carrera). Obtenemos un sufijo nuevo.
+      const retryUsername = await resolveUniqueUsername(baseName);
+      result = await pool.query(queryText, [sessionId, retryUsername, now]);
+    } else {
+      throw err;
+    }
+  }
   const row = result.rows[0];
 
   return {

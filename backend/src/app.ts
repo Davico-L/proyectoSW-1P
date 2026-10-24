@@ -3,6 +3,7 @@ import cors from "cors";
 import { healthRouter } from "./routes/healthRoutes";
 import { sessionRouter } from "./routes/sessionRoutes";
 import { diagramRouter } from "./routes/diagramRoutes";
+import { authRouter } from "./routes/authRoutes";
 
 export const app: Application = express();
 
@@ -35,6 +36,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use("/health", healthRouter);
 app.use("/session", sessionRouter);
 app.use("/diagrams", diagramRouter);
+app.use("/auth", authRouter);
 
 // Ruta raíz informativa
 app.get("/", (_req: Request, res: Response) => {
@@ -43,7 +45,11 @@ app.get("/", (_req: Request, res: Response) => {
     version: "1.0.0",
     endpoints: {
       health: "GET /health",
-      session: "POST /session",
+      session: "GET /session/:id (validación de sesión)",
+      auth: {
+        register: "POST /auth/register",
+        login: "POST /auth/login",
+      },
       diagrams: {
         create: "POST /diagrams",
         get: "GET /diagrams/:id",

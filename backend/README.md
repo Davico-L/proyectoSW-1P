@@ -78,7 +78,9 @@ npm run typecheck
 | Método | Ruta | Descripción | Payload |
 |---|---|---|---|
 | `GET` | `/health` | Estado del servidor y conectividad a Postgres | - |
-| `POST` | `/session` | Creación de sesión ligera de usuario | `{"username": "juan"}` |
+| `POST` | `/auth/register` | Registro de nuevo usuario (devuelve session_id y username) | `{"username": "juan", "password": "..."}` |
+| `POST` | `/auth/login` | Inicio de sesión / reclamo de cuenta (devuelve session_id y username) | `{"username": "juan", "password": "..."}` |
+| `POST` | `/session` | Deprecado (responde 410 Gone) | - |
 | `GET` | `/session/:id` | Consulta de datos de sesión activa | - |
 | `POST` | `/diagrams` | Guarda un nuevo diagrama de Excalidraw | `{"session_id": "UUID", "name": "Mi Diagrama", "data": {"elements": [...], "appState": {...}}}` |
 | `GET` | `/diagrams/:id` | Obtiene el estado guardado de un diagrama | - |
