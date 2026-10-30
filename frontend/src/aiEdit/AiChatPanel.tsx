@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useAiChat, type Message } from "./useAiChat";
+import { useHelpChat } from "./useHelpChat";
 import { useSpeechRecognition } from "./useSpeechRecognition";
 import "./AiChat.scss";
 
@@ -9,6 +10,7 @@ export interface AiChatPanelProps {
   excalidrawAPI: ExcalidrawImperativeAPI | null;
   onClose: () => void;
   backendUrl?: string;
+  initialMode?: "edit" | "help";
 }
 
 export const AiChatPanel: React.FC<AiChatPanelProps> = ({
@@ -16,6 +18,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   excalidrawAPI,
   onClose,
   backendUrl,
+  initialMode = "edit",
 }) => {
   const {
     messages,
@@ -28,6 +31,22 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     loadingMessage,
     addCustomMessage,
   } = useAiChat({ diagramId, excalidrawAPI, backendUrl });
+
+  // Modo activo del asistente: edición de diagrama o ayuda sobre la herramienta
+  const [mode, setMode] = useState<"edit" | "help">(initialMode);
+  const {
+    messages: helpMessages,
+    loading: helpLoading,
+    sendQuestion,
+    askPrepared,
+    suggestedTopics,
+    moreTopics,
+  } = useHelpChat(backendUrl);
+
+  const [showMoreTopics, setShowMoreTopics] = useState<boolean>(false);
+
+  const activeMessages = mode === "edit" ? messages : helpMessages;
+  const activeLoading = mode === "edit" ? loading : helpLoading;
 
   // Hook de reconocimiento de voz configurado en es-BO
   const {
@@ -62,10 +81,28 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll hacia el final cuando se agrega un mensaje o cambia el estado de carga
+  // Auto-scroll hacia el final cuando se agrega un mensaje o cambia el estado de carga, modo o sugerencias
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [
+    activeMessages,
+    activeLoading,
+    mode,
+    suggestedTopics,
+    moreTopics,
+    showMoreTopics,
+  ]);
+
+  // Manejo de cambio de pestaña con detención de dictado si está activo
+  const handleTabChange = (newMode: "edit" | "help") => {
+    if (newMode === mode) {
+      return;
+    }
+    if (isListening) {
+      stopSpeech();
+    }
+    setMode(newMode);
+  };
 
   // Enfocar el textarea al abrir el panel
   useEffect(() => {
@@ -140,6 +177,10 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (mode === "help") {
+      return;
+    }
+
     const items = e.clipboardData?.items;
     let imageFile: File | null = null;
 
@@ -259,6 +300,18 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         return;
       }
 
+      if (mode === "help") {
+        if (helpLoading) {
+          return;
+        }
+        const textToSend = inputText;
+        isVoiceActiveRef.current = false;
+        resetSpeech();
+        setInputText("");
+        sendQuestion(textToSend);
+        return;
+      }
+
       if (attachedImage) {
         const fileToSend = attachedImage.file;
         const textToSend = inputText;
@@ -281,6 +334,18 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     // Si está escuchando, detener la escucha y NO enviar todavía
     if (isListening) {
       stopSpeech();
+      return;
+    }
+
+    if (mode === "help") {
+      if (helpLoading) {
+        return;
+      }
+      const textToSend = inputText;
+      isVoiceActiveRef.current = false;
+      resetSpeech();
+      setInputText("");
+      sendQuestion(textToSend);
       return;
     }
 
@@ -343,13 +408,35 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         </button>
       </div>
 
+      {/* Barra de pestañas */}
+      <div className="ai-chat-tabs" role="tablist" aria-label="Modo del asistente">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "edit"}
+          className={`ai-chat-tab ${mode === "edit" ? "ai-chat-tab--active" : ""}`.trim()}
+          onClick={() => handleTabChange("edit")}
+        >
+          Editar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "help"}
+          className={`ai-chat-tab ${mode === "help" ? "ai-chat-tab--active" : ""}`.trim()}
+          onClick={() => handleTabChange("help")}
+        >
+          Ayuda
+        </button>
+      </div>
+
       {/* Lista de mensajes */}
       <div className="ai-chat-messages">
-        {messages.map((msg: Message, index: number) => {
+        {activeMessages.map((msg: Message, index: number) => {
           const isUser = msg.role === "user";
           const variantClass = !isUser && msg.variant ? `variant-${msg.variant}` : "variant-info";
-          const isLastMessage = index === messages.length - 1;
-          const showRetry = isLastMessage && !isUser && msg.retryable && !loading;
+          const isLastMessage = index === activeMessages.length - 1;
+          const showRetry = mode === "edit" && isLastMessage && !isUser && msg.retryable && !loading;
 
           return (
             <div
@@ -367,7 +454,13 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                   />
                 </div>
               )}
-              <div className="ai-chat-msg-text">{msg.text}</div>
+              <div
+                className={`ai-chat-msg-text ${
+                  mode === "help" ? "ai-chat-msg-text--help" : ""
+                }`.trim()}
+              >
+                {msg.text}
+              </div>
               {showRetry && (
                 <div className="ai-chat-msg-actions">
                   <button
@@ -398,14 +491,56 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         })}
 
         {/* Indicador de carga temporal del asistente */}
-        {loading && (
+        {activeLoading && (
           <div className="ai-chat-msg ai-chat-msg--assistant variant-info">
             <div className="ai-chat-loading-indicator">
               <div className="ai-chat-spinner" />
-              <span>{loadingMessage || "Pensando..."}</span>
+              <span>
+                {mode === "edit"
+                  ? loadingMessage || "Pensando..."
+                  : "Pensando..."}
+              </span>
             </div>
           </div>
         )}
+
+        {/* Bloque de sugerencias de preguntas en modo ayuda */}
+        {mode === "help" &&
+          !helpLoading &&
+          (suggestedTopics.length > 0 || moreTopics.length > 0) && (
+            <div className="ai-chat-suggestions">
+              {suggestedTopics.map((topic) => (
+                <button
+                  key={topic.id}
+                  type="button"
+                  className="ai-chat-chip"
+                  onClick={() => askPrepared(topic.id)}
+                >
+                  {topic.question}
+                </button>
+              ))}
+              {showMoreTopics &&
+                moreTopics.map((topic) => (
+                  <button
+                    key={topic.id}
+                    type="button"
+                    className="ai-chat-chip"
+                    onClick={() => askPrepared(topic.id)}
+                  >
+                    {topic.question}
+                  </button>
+                ))}
+              {moreTopics.length > 0 && (
+                <button
+                  type="button"
+                  className="ai-chat-chip ai-chat-chip--more"
+                  onClick={() => setShowMoreTopics((prev) => !prev)}
+                >
+                  {showMoreTopics ? "Ver menos" : "Ver más preguntas"}
+                </button>
+              )}
+            </div>
+          )}
 
         <div ref={messagesEndRef} />
       </div>
@@ -419,7 +554,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
       )}
 
       {/* Vista previa de imagen adjunta y/o error de validación */}
-      {(attachedImage || attachError) && (
+      {mode === "edit" && (attachedImage || attachError) && (
         <div className="ai-chat-attach-preview-container">
           {attachError && (
             <div className="ai-chat-attach-error" role="alert">
@@ -470,10 +605,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           placeholder={
             isListening
               ? "Dictá tu instrucción..."
+              : mode === "help"
+              ? "Preguntame cómo usar la herramienta (Enter para enviar, Shift+Enter para salto de línea)..."
               : "Escribí una instrucción (Enter para enviar, Shift+Enter para salto de línea)..."
           }
-          disabled={loading}
-          aria-label="Instrucción para el asistente"
+          disabled={activeLoading}
+          aria-label={
+            mode === "help"
+              ? "Pregunta para el asistente de ayuda"
+              : "Instrucción para el asistente"
+          }
         />
 
         {/* Input de archivo oculto para adjuntar imagen (sin atributo capture para permitir cámara o galería) */}
@@ -488,32 +629,34 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         />
 
         {/* Botón de adjuntar imagen */}
-        <button
-          type="button"
-          className="ai-chat-attach-btn"
-          onClick={handleAttachClick}
-          disabled={loading}
-          title="Adjuntar imagen (JPG, PNG o WEBP)"
-          aria-label="Adjuntar imagen"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        {mode === "edit" && (
+          <button
+            type="button"
+            className="ai-chat-attach-btn"
+            onClick={handleAttachClick}
+            disabled={loading}
+            title="Adjuntar imagen (JPG, PNG o WEBP)"
+            aria-label="Adjuntar imagen"
           >
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+        )}
 
         {/* Botón de micrófono */}
         <button
           type="button"
           className={`ai-chat-mic-btn ${isListening ? "is-listening" : ""}`}
           onClick={handleToggleVoice}
-          disabled={loading || !isSupported}
+          disabled={activeLoading || !isSupported}
           title={
             !isSupported
               ? "Tu navegador no soporta dictado por voz; usá el chat de texto"
@@ -548,21 +691,45 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         <button
           type="submit"
           className="ai-chat-send-btn"
-          disabled={loading || (!displayValue.trim() && !attachedImage)}
-          title="Enviar instrucción"
-          aria-label="Enviar"
+          style={
+            mode === "help" && helpLoading
+              ? {
+                  width: "auto",
+                  minWidth: "75px",
+                  padding: "0 10px",
+                  fontSize: "0.78rem",
+                }
+              : undefined
+          }
+          disabled={
+            mode === "help"
+              ? helpLoading || !displayValue.trim()
+              : loading || (!displayValue.trim() && !attachedImage)
+          }
+          title={
+            mode === "help"
+              ? helpLoading
+                ? "Pensando..."
+                : "Enviar pregunta"
+              : "Enviar instrucción"
+          }
+          aria-label={mode === "help" && helpLoading ? "Pensando..." : "Enviar"}
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="22" y1="2" x2="11" y2="13" />
-            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-          </svg>
+          {mode === "help" && helpLoading ? (
+            <span>Pensando...</span>
+          ) : (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          )}
         </button>
       </form>
     </div>

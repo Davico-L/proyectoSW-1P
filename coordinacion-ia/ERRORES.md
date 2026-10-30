@@ -26,3 +26,14 @@ Este documento registra los errores técnicos, bloqueos, problemas de integraci�
 - **Solución / Mitigación**: Se importó `ThinkingLevel` directamente desde `@google/genai` y se tipó la función `getThinkingLevelForModel` devolviendo `ThinkingLevel | null` mapeando los strings permitidos hacia los valores correspondientes del enum.
 - **Estado**: Resuelto
 
+---
+
+### [ERR-002] Bloqueo CORS en preflight para x-session-id en POST /help/ask
+- **Fecha**: 2026-10-27
+- **Componente / Módulo Afectado**: Backend / `backend/src/app.ts`
+- **Descripción**: El navegador bloqueaba peticiones `POST /help/ask` desde el frontend (`http://localhost:3001`) con el error: `Request header field x-session-id is not allowed by Access-Control-Allow-Headers in preflight response`.
+- **Causa Raíz**: La opción `allowedHeaders` en el middleware `cors(...)` de `backend/src/app.ts` solo incluía `["Content-Type", "Authorization"]`, omitiendo la cabecera personalizada `x-session-id` requerida por las rutas de sesión y ayuda.
+- **Solución / Mitigación**: Se añadió `"x-session-id"` a la lista `allowedHeaders` en la configuración de CORS existente, conservando intactos los demás orígenes, credenciales, métodos y cabeceras.
+- **Estado**: Resuelto
+
+

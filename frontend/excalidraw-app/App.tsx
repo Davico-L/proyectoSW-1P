@@ -149,6 +149,10 @@ import { createUmlRelationElement } from "../src/uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../src/uml/updateUmlRelationElement";
 import { AiChatButton } from "../src/aiEdit/AiChatButton";
 import { AiChatPanel } from "../src/aiEdit/AiChatPanel";
+import {
+  hasSeenHelpOnboarding,
+  markHelpOnboardingSeen,
+} from "../src/aiEdit/helpOnboarding";
 import { importXmiToCanvas } from "../src/xmiImporter/importXmiToCanvas";
 import { formatImportSummary } from "../src/xmiImporter/formatImportSummary";
 import type {
@@ -543,6 +547,10 @@ const ExcalidrawWrapper = ({
   const [editingUmlRelationElement, setEditingUmlRelationElement] =
     useState<ExcalidrawElement | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
+  const [aiChatInitialMode, setAiChatInitialMode] =
+    useState<"edit" | "help">("edit");
+  const helpOnboardingTriggeredRef = useRef(false);
+  const wasOpenRef = useRef(false);
 
   const handleUmlRelationModalConfirm = (
     multiplicitySource: string,
@@ -755,6 +763,32 @@ const ExcalidrawWrapper = ({
       }
     };
   }, []);
+
+  // Onboarding automático de ayuda para nuevos usuarios al abrir el lienzo por primera vez
+  useEffect(() => {
+    if (helpOnboardingTriggeredRef.current) {
+      return;
+    }
+
+    const diagramId = currentDiagramId || getActiveDiagramId();
+    const username =
+      activeUsername || localStorage.getItem(ACTIVE_USERNAME_KEY) || "";
+
+    if (diagramId && username && !hasSeenHelpOnboarding(username)) {
+      helpOnboardingTriggeredRef.current = true;
+      setAiChatInitialMode("help");
+      setIsAiChatOpen(true);
+      markHelpOnboardingSeen(username);
+    }
+  }, [currentDiagramId, activeUsername]);
+
+  // Al cerrar el panel (transición de true a false), restablecer el modo inicial a "edit"
+  useEffect(() => {
+    if (wasOpenRef.current && !isAiChatOpen) {
+      setAiChatInitialMode("edit");
+    }
+    wasOpenRef.current = isAiChatOpen;
+  }, [isAiChatOpen]);
 
   useEffect(() => {
     if (!isShareOpen) {
@@ -2655,6 +2689,7 @@ const ExcalidrawWrapper = ({
           diagramId={currentDiagramId || getActiveDiagramId()}
           excalidrawAPI={excalidrawAPI}
           onClose={() => setIsAiChatOpen(false)}
+          initialMode={aiChatInitialMode}
         />
       )}
     </div>

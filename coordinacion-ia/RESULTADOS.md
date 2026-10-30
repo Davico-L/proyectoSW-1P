@@ -199,3 +199,186 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - Backend typecheck (`npm run typecheck`): código de salida 0.
   - Backend build (`npm run build`): código de salida 0.
   - Frontend vitest (`npx vitest run LoginScreen importXmiToCanvas`): 8/8 pruebas pasadas.
+
+---
+
+### [RES-018] Base de conocimiento de ayuda en backend (CU-Ayuda Fase 1)
+- **Fecha**: 2026-10-26
+- **Archivos Creados**:
+  - `backend/src/help/helpTopics.ts`: Exporta `HelpTopic` y `HELP_TOPICS` con 16 tópicos estructurados con textos exactos sin markdown y voseo rioplatense. Se ajustó el límite de imagen a 15 MB en `ia-foto` y se verificó la versión real de Java (17) en `ejecutar-backend`.
+- **Archivos NO Modificados**: Ningún archivo existente modificado.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0.
+
+---
+
+### [RES-019] Endpoint GET /help/topics y registro de helpRouter (CU-Ayuda Fase 2)
+- **Fecha**: 2026-10-26
+- **Archivos Creados**:
+  - `backend/src/routes/helpRoutes.ts`: Exporta `helpRouter = Router()` con la ruta `GET /topics` que responde HTTP 200 con `{ topics: HELP_TOPICS }` sin requerir sesión.
+- **Archivos Modificados**:
+  - `backend/src/app.ts`: Importado `helpRouter` y registrado con `app.use("/help", helpRouter);` junto a las demás rutas bajo el middleware de CORS.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0 (`tsc`).
+
+---
+
+### [RES-020] Servicio de IA para el modo Ayuda (CU-Ayuda Fase 3)
+- **Fecha**: 2026-10-27
+- **Archivos Creados**:
+  - `backend/src/services/helpAssistant.ts`: Exporta `askHelpAssistant` y la clase `HelpAiError`. Implementa invocación en texto plano (Groq con `reasoning_effort: "low"` y modelo `openai/gpt-oss-20b`, Gemini con `gemini-3.6-flash`), prompt compilado a nivel de módulo con los 16 temas de `HELP_TOPICS`, validación de entrada (500 caracteres, últimos 6 mensajes del historial), logs `[UC17 DEBUG]` con proveedor, duración y tokens (sin registrar textos sensibles), y hasta 1 reintento con 1500 ms ante 503 o 429.
+- **Archivos NO Modificados**: Ningún archivo existente modificado.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0 (`tsc`).
+  - Pruebas directas de ejecución con Groq y Gemini: ambos proveedores responden correctamente y se verificó el reintento ante 503.
+  - Validación de entrada: rechazo inmediato de preguntas vacías con `HelpAiError(400)`.
+
+---
+
+### [RES-021] Endpoint POST /help/ask en helpRoutes.ts (CU-Ayuda Fase 4)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `backend/src/routes/helpRoutes.ts`: Implementada la ruta `POST /ask` con validación de sesión inline contra `getSession(sessionId)` (retornando 401 si falta o no existe), validación de `question` (1 a 500 caracteres, retornando 400), invocación a `askHelpAssistant({ question, history, username: session.username })`, mapeo de errores de `HelpAiError` (422 con `{ error: message }`, y 429/503/504 con `{ error: code, message }`) y fallback 500 registrando en logs sin incluir el contenido de la pregunta.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0 (`tsc`).
+
+---
+
+### [RES-022] Ajustes en helpTopics.ts y helpAssistant.ts (CU-Ayuda Fase 5)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `backend/src/help/helpTopics.ts`: Pregunta de `ia-voz` actualizada a "¿Cómo uso la voz o el dictado por micrófono?". En `crear-relacion`, agregada la oración verificada en código: "En Herencia, el origen es la clase hija y el destino la clase padre.".
+  - `backend/src/services/helpAssistant.ts`: Añadidas reglas literales en el prompt de sistema para ampliación semántica de temas ("la voz", "hablar", "dictar", "micrófono", "compartir", "colaborar"), estricto apego a la base, voseo obligatorio y texto plano estricto. Implementada función pura `sanitizeHelpResponse` para sanitización post-proceso (eliminación de `**` y comillas invertidas, reemplazo de guiones no separables U+2011/U+2010 por "-", eliminación de espacios al final de líneas y colapso de 3 o más saltos de línea a 2).
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0 (`tsc`).
+  - Prueba unitaria de `sanitizeHelpResponse`: remoción correcta de markdown, guiones unicode, espacios finales y saltos de línea redundantes.
+
+---
+
+### [RES-023] Pista determinista por palabras clave en helpAssistant.ts (CU-Ayuda Fase 6)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `backend/src/services/helpAssistant.ts`: Definida la constante `TOPIC_HINTS` con los 7 patrones regex verificados contra `HELP_TOPICS`. Implementada la función pura `getTopicHints` con normalización Unicode NFD. Añadida la regla literal de pistas internas al prompt de sistema. Inyección condicional de `[Pista interna: ...]` al final del mensaje del usuario enviado al modelo y registro del campo `pistas:` en logs `[UC17 DEBUG]`.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0 (`tsc`).
+  - Pruebas unitarias de `getTopicHints`: coincidencia exacta de patrones con y sin acentos, límite de 2 temas.
+
+---
+
+### [RES-024] Pista negativa y normalización de espacios en helpAssistant.ts (CU-Ayuda Fase 7)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `backend/src/services/helpAssistant.ts`:
+    1. En `sanitizeHelpResponse`: normalización previa de espacios especiales (U+00A0, U+202F, U+2009, U+200A, U+2007, U+2002, U+2003, U+3000) a espacio estándar ASCII 32 y remoción de caracteres de ancho cero (U+200B, U+200C, U+200D, U+2060, U+FEFF).
+    2. Constante `UNSUPPORTED_FORMAT`: regex para formatos no soportados (pdf, word, docx, excel, xlsx, png, svg, jpeg/jpg, csv, json). Si la consulta contiene "exportar", "descargar" o "guardar" y coincide con dicho regex, se inyecta la pista negativa interna y se registra `pistas: sin-soporte` en `[UC17 DEBUG]`.
+    3. En `SYSTEM_PROMPT`: agregadas las reglas literales para manejo de pista negativa ("usá exactamente la frase indicada y nada más") y copiado fiel de pasos de la base sin parafrasear.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Backend build (`npm --prefix backend run build`): compilación TypeScript exitosa con código 0 (`tsc`).
+  - Prueba de normalización de espacios con `"lo que\u202Fquerés"`: transformado correctamente a `"lo que querés"` (espacio ASCII 32).
+  - Pruebas de regex de formato no soportado (PDF detectado, XMI no afectado).
+
+---
+
+### [RES-025] Hook useHelpChat.ts en frontend (CU-Ayuda Fase 8)
+- **Fecha**: 2026-10-27
+- **Archivos Creados**:
+  - `frontend/src/aiEdit/useHelpChat.ts`: Hook personalizado de React `useHelpChat(backendUrl: string = BACKEND_URL)` que exporta `{ messages, loading, sendQuestion }`. Reutiliza la interfaz `Message` de `useAiChat.ts`, arranca con mensaje inicial de bienvenida en voseo, valida longitud máxima de 500 caracteres (con mensaje warning sin enviar), previene doble envío con `inFlightRef`, construye el historial con los últimos 6 mensajes válidos (filtrando bienvenida y advertencias/errores), extrae `x-session-id` desde `localStorage` (`classdraw_session_id` o `active_session_id`), envía POST a `/help/ask` y maneja estados HTTP (401 con invalidación de sesión en almacenamiento y evento `session-invalid`; 429/503/504; 422; 400; errores de red y otros errores) asegurando `loading = false` en `finally` y sin registrar el contenido de la pregunta en logs.
+- **Archivos NO Modificados**: Ningún archivo existente fue modificado.
+- **Pruebas Ejecutadas**:
+  - Frontend typecheck (`yarn --cwd frontend test:typecheck`): compilación TypeScript exitosa con código 0 (`tsc`).
+
+---
+
+### [RES-026] Pestañas Editar y Ayuda en AiChatPanel.tsx y estilos en AiChat.scss (CU-Ayuda Fase 9)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `frontend/src/aiEdit/AiChatPanel.tsx`: Integración aditiva de pestañas "Editar" y "Ayuda" con `role="tab"` y `aria-selected`. Estado local `mode` ("edit" | "help"), conexión con `useHelpChat(backendUrl)`, detención del dictado al alternar pestañas, bifurcación condicional de mensajes con clase `ai-chat-msg-text--help`, placeholder dinámico de ayuda, envío mediante `sendQuestion` y limpieza de `inputText`, botón con estado "Pensando..." deshabilitado en carga de ayuda, ocultamiento del botón de adjuntar y bloqueo de pegado de imágenes en modo ayuda sin alterar la imagen adjunta de edición.
+  - `frontend/src/aiEdit/AiChat.scss`: Clases aditivas `.ai-chat-tabs`, `.ai-chat-tab`, `.ai-chat-tab--active` con indicador inferior, y `.ai-chat-msg-text--help { white-space: pre-wrap; }`.
+- **Archivos NO Modificados**: `useAiChat.ts`, `AiChatButton.tsx` ni ningún otro archivo.
+- **Pruebas Ejecutadas**:
+  - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
+  - Build de frontend (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).
+
+---
+
+### [RES-027] Autorización de x-session-id en CORS preflight del backend
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `backend/src/app.ts`: Agregado `"x-session-id"` al array `allowedHeaders` en la configuración de `cors(...)`, preservando orígenes (`allowedOrigins`), credenciales (`credentials: true`), métodos (`GET, POST, PUT, DELETE, OPTIONS`) y headers previos (`Content-Type`, `Authorization`).
+- **Archivos NO Modificados**: Ningún endpoint, lógica funcional, autenticación ni hooks del frontend fueron modificados.
+- **Pruebas Ejecutadas**:
+  - Compilación TypeScript de backend (`npm --prefix backend run build`): exitosa con código 0.
+  - Test de preflight HTTP OPTIONS contra `/help/ask` con cabecera `Origin: http://localhost:3001` y `Access-Control-Request-Headers: x-session-id, Content-Type`: respuesta HTTP 204 con `Access-Control-Allow-Origin: http://localhost:3001` y `Access-Control-Allow-Headers: Content-Type,Authorization,x-session-id`.
+
+---
+
+### [RES-028] Temas sugeridos y askPrepared en useHelpChat.ts (CU-Ayuda Fase 10)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `frontend/src/aiEdit/useHelpChat.ts`: Exportada la interfaz `HelpTopic` y la constante `SUGGESTED_TOPIC_IDS`. Añadida la carga inicial vía `GET ${backendUrl}/help/topics` sin cabeceras de sesión (capturando fallos sin romper el estado), estado local `askedTopicIds`, función pura de UI `askPrepared(topicId)` que inserta directamente en `messages` el mensaje de usuario (`question`) y el del asistente (`answer`) sumando el id a `askedTopicIds` sin realizar llamadas de red, listas calculadas memoizadas `suggestedTopics` y `moreTopics`, y mensaje de bienvenida actualizado a `"¡Hola! Soy el asistente de ayuda. Tocá una pregunta sugerida o escribí la tuya."`.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
+  - Build de frontend (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).
+
+---
+
+### [RES-029] Chips de sugerencias de temas en AiChatPanel.tsx y estilos en AiChat.scss (CU-Ayuda Fase 11)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `frontend/src/aiEdit/AiChatPanel.tsx`: Destructuración de `askPrepared`, `suggestedTopics` y `moreTopics` desde `useHelpChat`. Estado local `showMoreTopics`. Renderizado aditivo del bloque `.ai-chat-suggestions` con botones `.ai-chat-chip` para `suggestedTopics` y para `moreTopics` desplegables condicionalmente mediante botón `.ai-chat-chip--more` ("Ver más preguntas" / "Ver menos"). Bloque no renderizado si no hay sugerencias y condicionado a modo "help" cuando no está cargando. Auto-scroll actualizado para incluir el bloque de sugerencias.
+  - `frontend/src/aiEdit/AiChat.scss`: Clases aditivas `.ai-chat-suggestions` (flex wrap con gap), `.ai-chat-chip` (botón con borde redondeado e interacción hover) y `.ai-chat-chip--more` (estilo sutil punteado con hover diferenciado).
+- **Archivos NO Modificados**: `useAiChat.ts`, `useHelpChat.ts` ni ningún otro archivo. Camino de modo "edit" 100% inalterado.
+- **Pruebas Ejecutadas**:
+  - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
+  - Build de frontend (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).
+
+---
+
+### [RES-030] Mapeo de errores de proveedor de IA a 503 AI_UNAVAILABLE en backend (CU-Ayuda)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `backend/src/services/helpAssistant.ts`: Mapeo de errores del proveedor distintos a 429, 503 o 504 (tales como 401, 403, 400, 404, etc.) a `HelpAiError(503, "AI_UNAVAILABLE", "El asistente de IA no está disponible por ahora. Probá con una de las preguntas sugeridas.")`. Logueo del `status original` del proveedor con prefijo `[UC17 DEBUG]` sin revelar texto de la pregunta ni de la respuesta.
+  - `backend/src/routes/helpRoutes.ts`: Salvaguarda en el bloque `catch` para que cualquier error con status 401 sea transformado a status 503, garantizando que el único HTTP 401 que puede salir de `POST /help/ask` provenga exclusivamente de sesión ausente o inválida (`{ "error": "No autenticado" }`).
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Compilación TypeScript de backend (`npm --prefix backend run build`): exitosa con código 0 (`tsc`).
+
+---
+
+### [RES-031] Módulo helpOnboarding.ts y prop initialMode en AiChatPanel (CU-Ayuda Fase 12)
+- **Fecha**: 2026-10-27
+- **Archivos Creados**:
+  - `frontend/src/aiEdit/helpOnboarding.ts`: Funciones exportadas puras `hasSeenHelpOnboarding(username)` y `markHelpOnboardingSeen(username)`. Almacena en `localStorage` bajo `"help_onboarding_seen_" + username.trim().toLowerCase()`. Manejo seguro con `try/catch` (devolviendo `true` si falla el almacenamiento o si el nombre de usuario está vacío para no interrumpir al usuario; `mark` no realiza operaciones si el usuario está vacío).
+- **Archivos Modificados**:
+  - `frontend/src/aiEdit/AiChatPanel.tsx`: Añadida prop opcional `initialMode?: "edit" | "help"` a la interfaz `AiChatPanelProps`, inicializando por defecto `initialMode = "edit"` y utilizada exclusivamente como valor inicial del estado `mode`.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
+  - Build de producción (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).
+
+---
+
+### [RES-032] Onboarding de ayuda automática en App.tsx (CU-Ayuda Fase 13)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `frontend/excalidraw-app/App.tsx`: Incorporación del estado `aiChatInitialMode` ("edit" | "help"), ref de guarda `helpOnboardingTriggeredRef` para prevenir doble ejecución en StrictMode, `useEffect` que verifica la presencia del lienzo mostrado (`currentDiagramId || getActiveDiagramId()`) y usuario activo (`activeUsername / ACTIVE_USERNAME_KEY`) con `!hasSeenHelpOnboarding(username)` para activar `setAiChatInitialMode("help")`, `setIsAiChatOpen(true)` y `markHelpOnboardingSeen(username)`. `useEffect` que reestablece `aiChatInitialMode` a "edit" al cerrar el panel (`!isAiChatOpen`), y pase de `initialMode={aiChatInitialMode}` a `<AiChatPanel>`.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
+  - Build de producción (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).
+
+---
+
+### [RES-033] Corrección de condición de carrera en initialMode / onboarding en App.tsx (CU-Ayuda)
+- **Fecha**: 2026-10-27
+- **Archivos Modificados**:
+  - `frontend/excalidraw-app/App.tsx`: Incorporada la ref `wasOpenRef = useRef(false)`. Se corrigió el efecto de reseteo para que evalúe `if (wasOpenRef.current && !isAiChatOpen)`, ejecutando `setAiChatInitialMode("edit")` única y exclusivamente en la transición de `true` a `false` (cuando el usuario cierra el panel), evitando que en el montaje inicial cuando `isAiChatOpen` aún es `false` se pise el valor `"help"` programado por el efecto de onboarding automático.
+- **Archivos NO Modificados**: Ningún otro archivo modificado.
+- **Pruebas Ejecutadas**:
+  - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
+  - Build de producción (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).

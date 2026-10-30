@@ -4,6 +4,7 @@ import { healthRouter } from "./routes/healthRoutes";
 import { sessionRouter } from "./routes/sessionRoutes";
 import { diagramRouter } from "./routes/diagramRoutes";
 import { authRouter } from "./routes/authRoutes";
+import { helpRouter } from "./routes/helpRoutes";
 
 export const app: Application = express();
 
@@ -25,7 +26,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-session-id"],
   })
 );
 
@@ -37,6 +38,7 @@ app.use("/health", healthRouter);
 app.use("/session", sessionRouter);
 app.use("/diagrams", diagramRouter);
 app.use("/auth", authRouter);
+app.use("/help", helpRouter);
 
 // Ruta raíz informativa
 app.get("/", (_req: Request, res: Response) => {
