@@ -746,6 +746,7 @@ const ExcalidrawWrapper = ({
     getActiveDiagramId(),
   );
   const [isGeneratingBackend, setIsGeneratingBackend] = useState(false);
+  const [isGeneratingMobile, setIsGeneratingMobile] = useState(false);
   const [isExportingXmi, setIsExportingXmi] = useState(false);
   const [isImportingXmi, setIsImportingXmi] = useState(false);
   const xmiFileInputRef = useRef<HTMLInputElement>(null);
@@ -965,6 +966,92 @@ const ExcalidrawWrapper = ({
       }
     } finally {
       setIsGeneratingBackend(false);
+    }
+  };
+
+  const handleGenerateMobile = async () => {
+    const diagramId = currentDiagramId || getActiveDiagramId();
+    if (!diagramId || isGeneratingMobile) {
+      return;
+    }
+
+    setIsGeneratingMobile(true);
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/diagrams/${diagramId}/generate-mobile`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = "generated-mobile.zip";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: "¡App móvil generada y descargada con éxito!",
+            duration: 4000,
+            closable: true,
+          });
+        }
+      } else if (response.status === 400) {
+        let errorMsg =
+          "El diagrama debe tener al menos una clase válida para generar la app móvil";
+        try {
+          const data = await response.json();
+          if (data?.error) {
+            errorMsg = data.error;
+          }
+        } catch {
+          // fallback al mensaje por defecto
+        }
+
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: errorMsg,
+            duration: 6000,
+            closable: true,
+          });
+        } else {
+          alert(errorMsg);
+        }
+      } else {
+        const fallbackMsg = "No se pudo generar la app móvil, intenta de nuevo";
+        if (excalidrawAPI) {
+          excalidrawAPI.setToast({
+            message: fallbackMsg,
+            duration: 6000,
+            closable: true,
+          });
+        } else {
+          alert(fallbackMsg);
+        }
+      }
+    } catch (error) {
+      console.error("[generateMobile] Error al generar la app móvil:", error);
+      const fallbackMsg = "No se pudo generar la app móvil, intenta de nuevo";
+      if (excalidrawAPI) {
+        excalidrawAPI.setToast({
+          message: fallbackMsg,
+          duration: 6000,
+          closable: true,
+        });
+      } else {
+        alert(fallbackMsg);
+      }
+    } finally {
+      setIsGeneratingMobile(false);
     }
   };
 
@@ -1945,6 +2032,83 @@ const ExcalidrawWrapper = ({
                 )}
                 <span>
                   {isGeneratingBackend ? "Generando..." : "Generar Backend"}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="generate-mobile-button"
+                data-testid="toolbar-generate-mobile"
+                disabled={!currentDiagramId || isGeneratingMobile}
+                onClick={handleGenerateMobile}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  borderRadius: "8px",
+                  backgroundColor:
+                    !currentDiagramId || isGeneratingMobile
+                      ? "var(--color-surface-lowest, #f1f3f5)"
+                      : "var(--color-primary, #6965db)",
+                  color:
+                    !currentDiagramId || isGeneratingMobile
+                      ? "var(--color-text-secondary, #9ca3af)"
+                      : "#ffffff",
+                  border: "1px solid transparent",
+                  cursor:
+                    !currentDiagramId || isGeneratingMobile
+                      ? "not-allowed"
+                      : "pointer",
+                  transition: "all 0.15s ease",
+                  opacity: !currentDiagramId || isGeneratingMobile ? 0.6 : 1,
+                  boxShadow:
+                    !currentDiagramId || isGeneratingMobile
+                      ? "none"
+                      : "0 1px 2px rgba(0, 0, 0, 0.08)",
+                }}
+                title={
+                  !currentDiagramId
+                    ? "Guarda el diagrama primero para generar la app móvil"
+                    : isGeneratingMobile
+                    ? "Generando aplicación Flutter..."
+                    : "Generar y descargar app móvil Flutter"
+                }
+              >
+                {isGeneratingMobile ? (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      animation: "spin 1s linear infinite",
+                    }}
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                    <line x1="12" y1="18" x2="12.01" y2="18" />
+                  </svg>
+                )}
+                <span>
+                  {isGeneratingMobile ? "Generando..." : "Generar app móvil"}
                 </span>
               </button>
               <button

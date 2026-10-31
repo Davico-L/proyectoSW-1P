@@ -25,6 +25,8 @@ class ServicioIa {
   EstadoServicioIa _estado = EstadoServicioIa.noIniciado;
   String _mensajeEstado = 'No iniciado';
   String? _error;
+  String? promptActivo;
+  Map<String, Map<String, String>>? esquemaValidadorActivo;
   MetricasPreparacion? _metricas;
   Completer<MetricasPreparacion>? _completerPreparacion;
 
@@ -36,11 +38,22 @@ class ServicioIa {
   String? get error => _error;
   MetricasPreparacion? get metricas => _metricas;
 
-  /// Prepara el intérprete local una única vez.
-  /// Si ya está listo, devuelve las métricas previas inmediatamente.
-  /// Si ya se encuentra en preparación por otra llamada concurrente, espera el resultado en curso.
-  Future<MetricasPreparacion> preparar() async {
+  /// Prepara el intérprete local con el prompt y esquema indicados.
+  /// Si ya está listo y se solicita un prompt distinto, lanza una excepción
+  /// avisando que hay que reiniciar la aplicación.
+  Future<MetricasPreparacion> preparar([
+    String? prompt,
+    Map<String, Map<String, String>>? esquemaValidador,
+  ]) async {
+    if (esquemaValidador != null) {
+      esquemaValidadorActivo = esquemaValidador;
+    }
     if (estaListo && _metricas != null) {
+      if (prompt != null && promptActivo != null && prompt != promptActivo) {
+        throw StateError(
+          'El modelo ya está cargado con otro prompt. Debe reiniciar la app para cambiar de prompt.',
+        );
+      }
       return _metricas!;
     }
     if (_completerPreparacion != null) {
@@ -53,7 +66,13 @@ class ServicioIa {
     _error = null;
 
     try {
-      final m = await interprete.preparar();
+      if (prompt != null) {
+        promptActivo = prompt;
+      } else {
+        promptActivo = interprete.promptSistema;
+      }
+
+      final m = await interprete.preparar(prompt: promptActivo);
       _metricas = m;
       _estado = EstadoServicioIa.listo;
       _mensajeEstado =
@@ -73,11 +92,12 @@ class ServicioIa {
     }
   }
 
-  /// Ejecuta la interpretación de una frase con el esquema dado.
+  /// Ejecuta la interpretación de una frase con el esquema dado (o el activo).
   Future<ResultadoInterpretacion> interpretar(
-    String frase,
-    Map<String, Map<String, String>> esquemaValidador,
-  ) {
-    return interprete.interpretar(frase, esquemaValidador);
+    String frase, [
+    Map<String, Map<String, String>>? esquemaValidador,
+  ]) {
+    final esquema = esquemaValidador ?? esquemaValidadorActivo ?? {};
+    return interprete.interpretar(frase, esquema);
   }
 }

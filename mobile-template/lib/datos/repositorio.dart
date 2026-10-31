@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:mobile_template/esquema/esquema.dart';
 
@@ -7,26 +8,112 @@ class Repositorio {
 
   Repositorio(this.esquema, this.db);
 
-  /// (1) abrir(Esquema): abre o crea la base "app.db" con getDatabasesPath() de sqflite
-  /// (une la ruta con '/', sin paquete path) y ejecuta sentenciasCrearTablas().
-  static Future<Repositorio> abrir(Esquema esquema) async {
-    final databasesPath = await getDatabasesPath();
-    final path = '$databasesPath/app.db';
+  /// Calcula una firma unívoca del esquema uniendo las sentencias DDL generadas.
+  static String calcularFirma(Esquema esquema) {
+    return esquema.sentenciasCrearTablas().join('\n');
+  }
 
-    final db = await openDatabase(
-      path,
-      version: 1,
-      onCreate: (Database db, int version) async {
-        for (final sentencia in esquema.sentenciasCrearTablas()) {
-          await db.execute(sentencia);
+  /// (1) abrir(Esquema): abre o crea la base "app.db" con getDatabasesPath() de sqflite.
+  /// Calcula la firma del esquema y la guarda en "esquema_firma.txt" junto a la base.
+  /// Si la firma guardada es distinta de la actual (o si no había firma pero sí existía la base),
+  /// mueve "app.db" a `app_anterior_<fecha y hora>.db` en la misma carpeta sin borrarla,
+  /// crea una base nueva con las tablas del esquema y guarda la firma nueva.
+  static Future<Repositorio> abrir(
+    Esquema esquema, {
+    String? directorioBases,
+    Future<Database> Function(String path, {OnDatabaseCreateFn? onCreate})? abrirDbFn,
+  }) async {
+    final databasesPath = directorioBases ?? await getDatabasesPath();
+    Directory(databasesPath).createSync(recursive: true);
+
+    final path = '$databasesPath/app.db';
+    final archivoDb = File(path);
+    final archivoFirma = File('$databasesPath/esquema_firma.txt');
+
+    final firmaActual = calcularFirma(esquema);
+    final dbExiste = archivoDb.existsSync();
+    final firmaExiste = archivoFirma.existsSync();
+
+    bool rotarBase = false;
+
+    if (dbExiste) {
+      if (!firmaExiste) {
+        // Si no existía firma pero sí base, trátalo como firma distinta
+        rotarBase = true;
+      } else {
+        final firmaGuardada = archivoFirma.readAsStringSync().trim();
+        if (firmaGuardada != firmaActual.trim()) {
+          rotarBase = true;
         }
-      },
-    );
+      }
+    }
+
+    if (rotarBase) {
+      // Mueve app.db a app_anterior_<fecha y hora>.db en la misma carpeta (sin borrarla)
+      final ahora = DateTime.now();
+      final stamp = '${ahora.year.toString().padLeft(4, '0')}-'
+          '${ahora.month.toString().padLeft(2, '0')}-'
+          '${ahora.day.toString().padLeft(2, '0')}_'
+          '${ahora.hour.toString().padLeft(2, '0')}-'
+          '${ahora.minute.toString().padLeft(2, '0')}-'
+          '${ahora.second.toString().padLeft(2, '0')}';
+      var backupPath = '$databasesPath/app_anterior_$stamp.db';
+      var counter = 1;
+      while (File(backupPath).existsSync()) {
+        backupPath = '$databasesPath/app_anterior_${stamp}_$counter.db';
+        counter++;
+      }
+
+      try {
+        archivoDb.renameSync(backupPath);
+      } catch (_) {
+        archivoDb.copySync(backupPath);
+        archivoDb.deleteSync();
+      }
+
+      // Mover archivos auxiliares de SQLite si existen (-wal, -shm, -journal)
+      for (final ext in ['-wal', '-shm', '-journal']) {
+        final aux = File('$path$ext');
+        if (aux.existsSync()) {
+          try {
+            aux.renameSync('$backupPath$ext');
+          } catch (_) {
+            aux.copySync('$backupPath$ext');
+            aux.deleteSync();
+          }
+        }
+      }
+    }
+
+    final Database db;
+    if (abrirDbFn != null) {
+      db = await abrirDbFn(
+        path,
+        onCreate: (Database db, int version) async {
+          for (final sentencia in esquema.sentenciasCrearTablas()) {
+            await db.execute(sentencia);
+          }
+        },
+      );
+    } else {
+      db = await openDatabase(
+        path,
+        version: 1,
+        onCreate: (Database db, int version) async {
+          for (final sentencia in esquema.sentenciasCrearTablas()) {
+            await db.execute(sentencia);
+          }
+        },
+      );
+    }
 
     // Ejecuta las sentencias para asegurar que las tablas existan siempre
     for (final sentencia in esquema.sentenciasCrearTablas()) {
       await db.execute(sentencia);
     }
+
+    // Guarda la firma nueva en el archivo de texto junto a la base
+    archivoFirma.writeAsStringSync(firmaActual);
 
     return Repositorio(esquema, db);
   }

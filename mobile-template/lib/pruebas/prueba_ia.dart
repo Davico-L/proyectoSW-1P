@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_template/esquema/esquema.dart';
 import 'package:mobile_template/ia/interprete.dart';
+import 'package:mobile_template/ia/prompt_barberia.dart';
+import 'package:mobile_template/ia/prompt_generado.dart';
 import 'package:mobile_template/ia/servicio_ia.dart';
 
 class FrasePrueba {
@@ -117,6 +119,26 @@ const List<FrasePrueba> kOchoFrases = [
 class PruebaIaScreen extends StatefulWidget {
   const PruebaIaScreen({super.key});
 
+  /// Segundo esquema disponible para pruebas
+  static final Esquema esquemaTienda = Esquema.desdeJson({
+    'clases': [
+      {
+        'nombre': 'Categoria',
+        'campos': [
+          {'nombre': 'nombre', 'tipo': 'texto'},
+        ],
+      },
+      {
+        'nombre': 'Producto',
+        'campos': [
+          {'nombre': 'categoria', 'tipo': 'ref', 'destino': 'Categoria'},
+          {'nombre': 'descripcion', 'tipo': 'texto'},
+          {'nombre': 'precio', 'tipo': 'numero'},
+        ],
+      },
+    ],
+  });
+
   @override
   State<PruebaIaScreen> createState() => _PruebaIaScreenState();
 }
@@ -142,17 +164,27 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
     ],
   });
 
-  static final Map<String, Map<String, String>> esquemaValidador =
-      esquemaBarberia.paraValidador();
+  String _opcionEsquema = 'Barbería';
+
+  Esquema get _esquemaActual =>
+      _opcionEsquema == 'Tienda' ? PruebaIaScreen.esquemaTienda : esquemaBarberia;
+
+  Map<String, Map<String, String>> get _esquemaValidadorActual =>
+      _esquemaActual.paraValidador();
+
+  Map<String, Map<String, String>> get esquemaValidador => _esquemaValidadorActual;
+
+  String get _promptActual => _opcionEsquema == 'Tienda'
+      ? construirPrompt(PruebaIaScreen.esquemaTienda)
+      : promptBarberia;
 
   final ServicioIa _servicioIa = ServicioIa.instancia;
-  Interprete get _interprete => _servicioIa.interprete;
   final TextEditingController _fraseController = TextEditingController(
     text: 'Registra al cliente Juan Pérez, corte de barba, 10 bolivianos',
   );
 
-  bool _preparando = true;
-  String _estadoMensaje = 'Preparando asistente...';
+  bool _preparando = false;
+  String _estadoMensaje = 'No iniciado';
   String? _errorPreparacion;
   MetricasPreparacion? _metricasPreparacion;
 
@@ -162,10 +194,40 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
   bool _corriendoLote = false;
   final List<String> _lineasLote = [];
 
+  bool get _hayIncompatibilidadPrompt =>
+      _servicioIa.estaListo &&
+      _servicioIa.promptActivo != null &&
+      _servicioIa.promptActivo != _promptActual;
+
+  String _nombreEsquemaActivo(String prompt) {
+    if (prompt == promptBarberia) return 'Barbería';
+    if (prompt == construirPrompt(PruebaIaScreen.esquemaTienda)) return 'Tienda';
+    return 'Generado';
+  }
+
   @override
   void initState() {
     super.initState();
-    _iniciarPreparacion();
+    if (_servicioIa.estaListo && _servicioIa.promptActivo != null) {
+      _preparando = false;
+      _metricasPreparacion = _servicioIa.metricas;
+      if (_servicioIa.promptActivo ==
+          construirPrompt(PruebaIaScreen.esquemaTienda)) {
+        _opcionEsquema = 'Tienda';
+        _fraseController.text =
+            'Registra la categoría Bebidas, gaseosa cola, 12 bolivianos';
+      } else {
+        _opcionEsquema = 'Barbería';
+      }
+      _estadoMensaje = 'Asistente listo [$_opcionEsquema].';
+    } else if (_servicioIa.estaPreparando) {
+      _preparando = true;
+      _estadoMensaje = 'Preparando asistente...';
+    } else {
+      _preparando = false;
+      _estadoMensaje =
+          'Asistente no preparado. Elige un esquema y presiona Preparar asistente.';
+    }
   }
 
   @override
@@ -175,6 +237,19 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
   }
 
   Future<void> _iniciarPreparacion() async {
+    final String promptDeseado = _promptActual;
+    final esquemaValidadorDeseado = _esquemaValidadorActual;
+
+    // Si ya está listo con otro prompt, avisa que hay que reiniciar la app
+    if (_servicioIa.estaListo &&
+        _servicioIa.promptActivo != null &&
+        _servicioIa.promptActivo != promptDeseado) {
+      setState(() {
+        _estadoMensaje = 'Reinicia la app para cambiar de modo';
+      });
+      return;
+    }
+
     setState(() {
       _preparando = true;
       _estadoMensaje = 'Preparando asistente...';
@@ -182,13 +257,14 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
     });
 
     try {
-      final metricas = await _servicioIa.preparar();
+      final metricas =
+          await _servicioIa.preparar(promptDeseado, esquemaValidadorDeseado);
       if (!mounted) return;
       setState(() {
         _preparando = false;
         _metricasPreparacion = metricas;
         _estadoMensaje =
-            'Asistente listo.\nCarga: ${metricas.segundosCarga.toStringAsFixed(2)} s | '
+            'Asistente listo [$_opcionEsquema].\nCarga: ${metricas.segundosCarga.toStringAsFixed(2)} s | '
             'Calentamiento: ${metricas.segundosCalentamiento.toStringAsFixed(2)} s | '
             'Total: ${metricas.segundosTotales.toStringAsFixed(2)} s';
       });
@@ -197,12 +273,14 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
       setState(() {
         _preparando = false;
         _errorPreparacion = e.toString();
-        _estadoMensaje = 'Error en la preparación: $e';
+        _estadoMensaje =
+            e is StateError ? e.message : 'Error en la preparación: $e';
       });
     }
   }
 
   Future<void> _interpretarFrase() async {
+    if (_hayIncompatibilidadPrompt || !_servicioIa.estaListo) return;
     final frase = _fraseController.text.trim();
     if (frase.isEmpty) return;
 
@@ -212,7 +290,8 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
     });
 
     try {
-      final res = await _interprete.interpretar(frase, esquemaValidador);
+      final res =
+          await _servicioIa.interpretar(frase, _esquemaValidadorActual);
       if (!mounted) return;
       setState(() {
         _ultimoResultado = res;
@@ -232,6 +311,7 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
   }
 
   Future<void> _correrOchoFrases() async {
+    if (_hayIncompatibilidadPrompt || !_servicioIa.estaListo) return;
     setState(() {
       _corriendoLote = true;
       _lineasLote.clear();
@@ -243,7 +323,8 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
 
     for (final item in kOchoFrases) {
       try {
-        final inter = await _interprete.interpretar(item.frase, esquemaValidador);
+        final inter =
+            await _servicioIa.interpretar(item.frase, _esquemaValidadorActual);
         final ok = item.cumple(inter);
         if (ok) aciertos++;
 
@@ -294,11 +375,75 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Selector de Esquema
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Esquema:',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    DropdownButton<String>(
+                      value: _opcionEsquema,
+                      underline: const SizedBox(),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'Barbería',
+                          child: Text('Barbería'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Tienda',
+                          child: Text('Tienda'),
+                        ),
+                      ],
+                      onChanged: (nuevo) {
+                        if (nuevo != null && nuevo != _opcionEsquema) {
+                          setState(() {
+                            _opcionEsquema = nuevo;
+                            if (nuevo == 'Tienda') {
+                              _fraseController.text =
+                                  'Registra la categoría Bebidas, gaseosa cola, 12 bolivianos';
+                            } else {
+                              _fraseController.text =
+                                  'Registra al cliente Juan Pérez, corte de barba, 10 bolivianos';
+                            }
+                          });
+                          if (_servicioIa.estaListo) {
+                            if (_servicioIa.promptActivo != _promptActual) {
+                              setState(() {
+                                _estadoMensaje =
+                                    'Reinicia la app para cambiar de modo';
+                              });
+                            } else {
+                              setState(() {
+                                _estadoMensaje =
+                                    'Asistente listo [$_opcionEsquema].';
+                              });
+                            }
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
             // 1. Estado de inicialización
             Card(
-              color: _errorPreparacion != null
+              color: (_errorPreparacion != null || _hayIncompatibilidadPrompt)
                   ? Colors.red.shade50
-                  : (_preparando ? Colors.amber.shade50 : Colors.teal.shade50),
+                  : (_preparando
+                      ? Colors.amber.shade50
+                      : (_servicioIa.estaListo
+                          ? Colors.teal.shade50
+                          : Colors.grey.shade100)),
               elevation: 1,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -316,10 +461,14 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        else if (_errorPreparacion != null)
+                        else if (_errorPreparacion != null ||
+                            _hayIncompatibilidadPrompt)
                           const Icon(Icons.error_outline, color: Colors.red)
+                        else if (_servicioIa.estaListo)
+                          const Icon(Icons.check_circle_outline,
+                              color: Colors.teal)
                         else
-                          const Icon(Icons.check_circle_outline, color: Colors.teal),
+                          const Icon(Icons.info_outline, color: Colors.indigo),
                         const SizedBox(width: 8),
                         const Text(
                           'Estado del Intérprete Local',
@@ -329,17 +478,49 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _estadoMensaje,
+                      _hayIncompatibilidadPrompt
+                          ? 'Reinicia la app para cambiar de modo'
+                          : _estadoMensaje,
                       style: TextStyle(
                         fontSize: 13,
-                        color: _errorPreparacion != null ? Colors.red.shade900 : Colors.black87,
+                        fontWeight: _hayIncompatibilidadPrompt
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: (_errorPreparacion != null ||
+                                _hayIncompatibilidadPrompt)
+                            ? Colors.red.shade900
+                            : Colors.black87,
                       ),
                     ),
+                    if (_servicioIa.estaListo &&
+                        _servicioIa.promptActivo != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Prompt cargado: "${_servicioIa.promptActivo!.length > 80 ? _servicioIa.promptActivo!.substring(0, 80) : _servicioIa.promptActivo!}..."\n'
+                        'Esquema activo: ${_nombreEsquemaActivo(_servicioIa.promptActivo!)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.indigo,
+                        ),
+                      ),
+                    ],
                     if (_metricasPreparacion != null) ...[
                       const SizedBox(height: 4),
                       Text(
                         'Ruta: ${_metricasPreparacion!.rutaModelo}',
-                        style: const TextStyle(fontSize: 11, color: Colors.black54),
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.black54),
+                      ),
+                    ],
+                    if (!_servicioIa.estaListo &&
+                        !_preparando &&
+                        !_hayIncompatibilidadPrompt) ...[
+                      const SizedBox(height: 10),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: Text('Preparar asistente ($_opcionEsquema)'),
+                        onPressed: _iniciarPreparacion,
                       ),
                     ],
                   ],
@@ -354,10 +535,15 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
               decoration: const InputDecoration(
                 labelText: 'Frase a interpretar',
                 border: OutlineInputBorder(),
-                hintText: 'Ej. Registra al cliente Juan Pérez, corte de barba, 10 bolivianos',
+                hintText:
+                    'Ej. Registra al cliente Juan Pérez, corte de barba, 10 bolivianos',
               ),
               maxLines: 2,
-              enabled: !_preparando && !_procesando && !_corriendoLote,
+              enabled: !_preparando &&
+                  !_procesando &&
+                  !_corriendoLote &&
+                  !_hayIncompatibilidadPrompt &&
+                  _servicioIa.estaListo,
             ),
             const SizedBox(height: 8),
             ElevatedButton.icon(
@@ -366,7 +552,9 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
               onPressed: (!_preparando &&
                       _errorPreparacion == null &&
                       !_procesando &&
-                      !_corriendoLote)
+                      !_corriendoLote &&
+                      !_hayIncompatibilidadPrompt &&
+                      _servicioIa.estaListo)
                   ? _interpretarFrase
                   : null,
             ),
@@ -427,7 +615,9 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
               onPressed: (!_preparando &&
                       _errorPreparacion == null &&
                       !_procesando &&
-                      !_corriendoLote)
+                      !_corriendoLote &&
+                      !_hayIncompatibilidadPrompt &&
+                      _servicioIa.estaListo)
                   ? _correrOchoFrases
                   : null,
             ),

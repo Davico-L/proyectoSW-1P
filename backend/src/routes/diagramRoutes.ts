@@ -8,6 +8,7 @@ import {
 } from "../services/diagramService";
 import { extractUmlModel } from "../backendGenerator/extractModel";
 import { buildBackendZip } from "../backendGenerator/buildZip";
+import { buildMobileZip } from "../mobileGenerator/buildMobileZip";
 import { editDiagramByInstruction, isTimeoutError } from "../services/gemini";
 import { editDiagramByInstructionGroq } from "../services/groq";
 import { validateAndResolveOperations } from "../services/operationValidator";
@@ -173,6 +174,42 @@ diagramRouter.post("/:id/generate-backend", async (req: Request, res: Response):
 
     console.error("[diagramRoutes] Error en POST /diagrams/:id/generate-backend:", error);
     res.status(500).json({ error: "Error generando el backend" });
+  }
+});
+
+// POST /diagrams/:id/generate-mobile: Generar y descargar la aplicación móvil Flutter como archivo ZIP
+diagramRouter.post("/:id/generate-mobile", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "Identificador de diagrama inválido." });
+      return;
+    }
+
+    const diagram = await getDiagramById(id);
+    if (!diagram) {
+      res.status(404).json({ error: "Diagrama no encontrado" });
+      return;
+    }
+
+    const model = extractUmlModel(diagram.data);
+    const zipBuffer = await buildMobileZip(model);
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", 'attachment; filename="generated-mobile.zip"');
+    res.send(zipBuffer);
+  } catch (error: any) {
+    if (
+      error instanceof Error &&
+      error.message === "El diagrama debe tener al menos una clase válida para generar la app móvil"
+    ) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+
+    console.error("[diagramRoutes] Error en POST /diagrams/:id/generate-mobile:", error);
+    res.status(500).json({ error: "Error generando la app móvil" });
   }
 });
 

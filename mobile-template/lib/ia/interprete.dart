@@ -43,6 +43,7 @@ class ResultadoInterpretacion {
 class Interprete {
   final String? rutaModelo;
   final int threads;
+  String promptSistema;
 
   double? _contextId;
   String? _rutaResuelta;
@@ -50,6 +51,7 @@ class Interprete {
   Interprete({
     this.rutaModelo,
     this.threads = 4,
+    this.promptSistema = promptBarberia,
   });
 
   bool get estaListo => _contextId != null;
@@ -72,8 +74,8 @@ char ::= [^"\\\x00-\x1f] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4})
 number ::= [0-9]+ ("." [0-9]+)?
 ''';
 
-  static String _buildPrompt(String phrase) {
-    return '<|im_start|>system\n$promptBarberia<|im_end|>\n'
+  String _buildPrompt(String phrase) {
+    return '<|im_start|>system\n$promptSistema<|im_end|>\n'
         '<|im_start|>user\n$phrase<|im_end|>\n'
         '<|im_start|>assistant\n';
   }
@@ -171,7 +173,10 @@ number ::= [0-9]+ ("." [0-9]+)?
 
   /// (1) prepara el intérprete: verifica existencia del GGUF, carga el modelo
   /// y ejecuta la inferencia de calentamiento midiendo cada tiempo con Stopwatch.
-  Future<MetricasPreparacion> preparar() async {
+  Future<MetricasPreparacion> preparar({String? prompt}) async {
+    if (prompt != null) {
+      promptSistema = prompt;
+    }
     String rutaEsperada;
     try {
       final extDir = await getExternalStorageDirectory();
@@ -248,11 +253,12 @@ number ::= [0-9]+ ("." [0-9]+)?
     }
 
     final prompt = _buildPrompt(frase);
+    final grammarToUse = (promptSistema == promptBarberia) ? compactGbnf : '';
     final sw = Stopwatch()..start();
     final res = await FCllama.instance()?.completion(
       _contextId!,
       prompt: prompt,
-      grammar: compactGbnf,
+      grammar: grammarToUse,
       temperature: 0.0,
       nThreads: threads,
       nPredict: 60,

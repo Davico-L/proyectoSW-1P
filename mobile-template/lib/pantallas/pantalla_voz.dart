@@ -1,10 +1,16 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:mobile_template/datos/repositorio.dart';
+import 'package:mobile_template/esquema/cargar_esquema.dart';
 import 'package:mobile_template/esquema/esquema.dart';
 import 'package:mobile_template/esquema/esquema_barberia.dart';
+import 'package:mobile_template/ia/prompt_generado.dart';
 import 'package:mobile_template/ia/resumen.dart';
 import 'package:mobile_template/ia/servicio_ia.dart';
+import 'package:mobile_template/sync/config_servidor.dart';
+import 'package:mobile_template/sync/sincronizador.dart';
 import 'package:mobile_template/voz/servicio_voz.dart';
 
 class PantallaVoz extends StatefulWidget {
@@ -17,11 +23,18 @@ class PantallaVoz extends StatefulWidget {
 class _PantallaVozState extends State<PantallaVoz> {
   final ServicioIa _servicioIa = ServicioIa.instancia;
   final ServicioVoz _servicioVoz = ServicioVoz();
-  static final Map<String, Map<String, String>> _esquemaValidador =
-      esquemaBarberia.paraValidador();
+  Esquema? _esquema;
+
+  Esquema get _esquemaActual => _esquema ?? esquemaBarberia;
+  Map<String, Map<String, String>> get _esquemaValidador =>
+      _esquemaActual.paraValidador();
 
   Repositorio? _repositorio;
+  Sincronizador? _sincronizador;
   int _totalPendientes = 0;
+  bool _sincronizando = false;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _teniaRed = true;
 
   bool _preparando = true;
   String _estadoMensaje = 'Preparando asistente...';
@@ -51,16 +64,40 @@ class _PantallaVozState extends State<PantallaVoz> {
     super.initState();
     _servicioVoz.addListener(_onVozActualizada);
     _iniciarTodo();
+    _iniciarConectividad();
   }
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     _servicioVoz.removeListener(_onVozActualizada);
     _servicioVoz.dispose();
     for (final c in _controladores.values) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _iniciarConectividad() async {
+    try {
+      final initial = await Connectivity().checkConnectivity();
+      _teniaRed = initial.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      _teniaRed = true;
+    }
+
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((results) async {
+      final tieneRed = results.any((r) => r != ConnectivityResult.none);
+      if (!_teniaRed && tieneRed) {
+        // Al pasar de sin red a con red, sincroniza si hay URL y pendientes
+        final url = await ConfigServidor.leerUrl();
+        if (url != null && _totalPendientes > 0) {
+          _ejecutarSincronizacion(manual: false);
+        }
+      }
+      _teniaRed = tieneRed;
+    });
   }
 
   void _onVozActualizada() {
@@ -77,16 +114,23 @@ class _PantallaVozState extends State<PantallaVoz> {
     });
 
     try {
-      // 1. Abrir Repositorio una sola vez con el esquema oficial de barbería
-      _repositorio ??= await Repositorio.abrir(esquemaBarberia);
+      // 1. Cargar esquema dinámico desde assets/esquema.json (o barbería como respaldo)
+      _esquema = await cargarEsquema();
+
+      // 2. Abrir Repositorio una sola vez con el esquema cargado
+      _repositorio ??= await Repositorio.abrir(_esquemaActual);
+      _sincronizador = Sincronizador(_esquemaActual, _repositorio!);
       await _actualizarPendientes();
 
-      // 2. Preparar el servicio compartido de IA (si no está listo)
+      // 3. Preparar el servicio compartido de IA con el prompt generado del esquema
       if (!_servicioIa.estaListo) {
-        await _servicioIa.preparar();
+        await _servicioIa.preparar(
+          construirPrompt(_esquemaActual),
+          _esquemaValidador,
+        );
       }
 
-      // 3. Inicializar reconocimiento de voz (es_US, onDevice)
+      // 4. Inicializar reconocimiento de voz (es_US, onDevice)
       final vozOk = await _servicioVoz.inicializar();
       if (!vozOk && mounted) {
         _mensajeError = _servicioVoz.ultimoError;
@@ -112,8 +156,8 @@ class _PantallaVozState extends State<PantallaVoz> {
   Future<void> _actualizarPendientes() async {
     if (_repositorio == null) return;
     int count = 0;
-    for (final c in esquemaBarberia.clases) {
-      final tabla = esquemaBarberia.nombreTabla(c);
+    for (final c in _esquemaActual.clases) {
+      final tabla = _esquemaActual.nombreTabla(c);
       final res = await _repositorio!.db.rawQuery(
         'SELECT COUNT(*) as c FROM $tabla WHERE sincronizado = 0',
       );
@@ -124,6 +168,110 @@ class _PantallaVozState extends State<PantallaVoz> {
         _totalPendientes = count;
       });
     }
+  }
+
+  Future<void> _ejecutarSincronizacion({bool manual = true}) async {
+    if (_sincronizador == null || _sincronizando) return;
+    setState(() => _sincronizando = true);
+
+    try {
+      final res = await _sincronizador!.sincronizar();
+      await _actualizarPendientes();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.mensaje),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al sincronizar: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _sincronizando = false);
+      }
+    }
+  }
+
+  Future<void> _abrirDialogoUrl() async {
+    final urlActual = await ConfigServidor.leerUrl() ?? '';
+    final ctrl = TextEditingController(text: urlActual);
+    String? errorLocal;
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Dirección del servidor'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Ingresa la URL del backend Spring Boot:',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrl,
+                    decoration: InputDecoration(
+                      labelText: 'URL base',
+                      hintText: 'http://192.168.1.10:8081',
+                      border: const OutlineInputBorder(),
+                      errorText: errorLocal,
+                    ),
+                    keyboardType: TextInputType.url,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final texto = ctrl.text.trim();
+                    if (!ConfigServidor.esValida(texto)) {
+                      setDialogState(() {
+                        errorLocal =
+                            'Debe comenzar con http (ej. http://192.168.1.10:8081)';
+                      });
+                      return;
+                    }
+                    try {
+                      final messenger = ScaffoldMessenger.of(context);
+                      await ConfigServidor.guardarUrl(texto);
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Servidor guardado correctamente.'),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      setDialogState(() {
+                        errorLocal = e.toString();
+                      });
+                    }
+                  },
+                  child: const Text('Guardar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _limpiarFormularioCrear() {
@@ -218,7 +366,7 @@ class _PantallaVozState extends State<PantallaVoz> {
           final p = resultado.p ?? 'hoy';
 
           final datos = await _repositorio!.consultar(clase, q, p);
-          final textoResp = respuestaConsulta(q, p, clase, datos, esquemaBarberia);
+          final textoResp = respuestaConsulta(q, p, clase, datos, _esquemaActual);
 
           setState(() {
             _procesando = false;
@@ -231,7 +379,7 @@ class _PantallaVozState extends State<PantallaVoz> {
         if (resultado.accion == 'crear') {
           final nombreClase = resultado.clase ?? 'Atencion';
           ClaseEsq? claseEsq;
-          for (final c in esquemaBarberia.clases) {
+          for (final c in _esquemaActual.clases) {
             if (c.nombre.toLowerCase() == nombreClase.toLowerCase()) {
               claseEsq = c;
               break;
@@ -248,7 +396,7 @@ class _PantallaVozState extends State<PantallaVoz> {
 
           _limpiarFormularioCrear();
           _claseCrear = claseEsq;
-          _resumenCrearTexto = resumenCrear(resultado, esquemaBarberia);
+          _resumenCrearTexto = resumenCrear(resultado, _esquemaActual);
           _camposFaltantes.addAll(resultado.faltantes);
 
           for (final campo in claseEsq.campos) {
@@ -320,7 +468,7 @@ class _PantallaVozState extends State<PantallaVoz> {
     // y ya existe un registro con ese primer campo igual (sin mayúsculas ni acentos), avisa "Ya existe" y no inserta
     final tieneRefs = _claseCrear!.campos.any((c) => c.tipo == 'ref');
     if (!tieneRefs) {
-      final tabla = esquemaBarberia.nombreTabla(_claseCrear!);
+      final tabla = _esquemaActual.nombreTabla(_claseCrear!);
       final filas = await _repositorio!.db.query(tabla);
       final primerNorm = _normalizarTexto(primerValor);
       bool yaExiste = false;
@@ -393,24 +541,53 @@ class _PantallaVozState extends State<PantallaVoz> {
       ),
       bottomNavigationBar: SafeArea(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: Colors.grey.shade50,
             border: Border(top: BorderSide(color: Colors.grey.shade300)),
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                '$_totalPendientes pendientes',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              ),
-              if (_procesando)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+              Expanded(
+                child: Text(
+                  _totalPendientes == 0
+                      ? 'Sincronizado'
+                      : '$_totalPendientes pendientes',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: _totalPendientes == 0
+                        ? Colors.teal.shade800
+                        : Colors.black87,
+                  ),
                 ),
+              ),
+              if (_sincronizando)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8.0),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.sync_rounded, size: 18),
+                label: const Text('Sincronizar'),
+                onPressed: _sincronizando
+                    ? null
+                    : () => _ejecutarSincronizacion(manual: true),
+                style: ElevatedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.settings_rounded),
+                tooltip: 'Configurar servidor',
+                onPressed: _abrirDialogoUrl,
+              ),
             ],
           ),
         ),

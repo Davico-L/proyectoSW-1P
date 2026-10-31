@@ -238,5 +238,39 @@ void main() {
         equals(['cliente', 'servicio', 'monto']),
       );
     });
+
+    test('Esquema de la tienda produce paraValidador con las clases Categoria y Producto y sin Atencion', () {
+      final esquemaTienda = Esquema.desdeJson({
+        'clases': [
+          {
+            'nombre': 'Categoria',
+            'campos': [
+              {'nombre': 'nombre', 'tipo': 'texto'},
+            ],
+          },
+          {
+            'nombre': 'Producto',
+            'campos': [
+              {'nombre': 'categoria', 'tipo': 'ref', 'destino': 'Categoria'},
+              {'nombre': 'descripcion', 'tipo': 'texto'},
+              {'nombre': 'precio', 'tipo': 'numero'},
+            ],
+          },
+        ],
+      });
+
+      final validadorMap = esquemaTienda.paraValidador();
+
+      expect(validadorMap.containsKey('Categoria'), isTrue);
+      expect(validadorMap.containsKey('Producto'), isTrue);
+      expect(validadorMap.containsKey('Atencion'), isFalse);
+      expect(validadorMap.keys.toList(), equals(['Categoria', 'Producto']));
+      expect(validadorMap['Categoria'], equals({'nombre': 'texto'}));
+      expect(validadorMap['Producto'], equals({
+        'categoria': 'texto',
+        'descripcion': 'texto',
+        'precio': 'numero',
+      }));
+    });
   });
 }
