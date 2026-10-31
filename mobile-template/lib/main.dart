@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_template/pruebas/prueba_datos.dart';
 import 'package:mobile_template/pruebas/prueba_ia.dart';
+import 'package:mobile_template/pruebas/prueba_voz.dart';
+import 'package:mobile_template/pantallas/pantalla_voz.dart';
 
 void main() {
   runApp(const MobileTemplateApp());
@@ -35,7 +37,7 @@ class SampleHomeScreen extends StatelessWidget {
         elevation: 2,
       ),
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -111,6 +113,30 @@ class SampleHomeScreen extends StatelessWidget {
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => const PruebaIaScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.mic_rounded),
+                label: const Text('Prueba de voz'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PruebaVozScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.record_voice_over_rounded),
+                label: const Text('Asistente'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PantallaVoz(),
                     ),
                   );
                 },

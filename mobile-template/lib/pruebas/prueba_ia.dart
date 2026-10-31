@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_template/esquema/esquema.dart';
 import 'package:mobile_template/ia/interprete.dart';
+import 'package:mobile_template/ia/servicio_ia.dart';
 
 class FrasePrueba {
   final int id;
@@ -144,7 +145,8 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
   static final Map<String, Map<String, String>> esquemaValidador =
       esquemaBarberia.paraValidador();
 
-  final Interprete _interprete = Interprete();
+  final ServicioIa _servicioIa = ServicioIa.instancia;
+  Interprete get _interprete => _servicioIa.interprete;
   final TextEditingController _fraseController = TextEditingController(
     text: 'Registra al cliente Juan Pérez, corte de barba, 10 bolivianos',
   );
@@ -169,7 +171,6 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
   @override
   void dispose() {
     _fraseController.dispose();
-    _interprete.liberar();
     super.dispose();
   }
 
@@ -181,7 +182,7 @@ class _PruebaIaScreenState extends State<PruebaIaScreen> {
     });
 
     try {
-      final metricas = await _interprete.preparar();
+      final metricas = await _servicioIa.preparar();
       if (!mounted) return;
       setState(() {
         _preparando = false;
