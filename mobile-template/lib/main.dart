@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:mobile_template/pruebas/prueba_datos.dart';
+import 'package:mobile_template/pruebas/prueba_ia.dart';
 
 void main() {
   runApp(const MobileTemplateApp());
@@ -88,6 +90,30 @@ class SampleHomeScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.table_view_rounded),
+                label: const Text('Prueba de datos'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PruebaDatosScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.smart_toy_rounded),
+                label: const Text('Prueba de IA'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PruebaIaScreen(),
+                    ),
+                  );
+                },
               ),
             ],
           ),
