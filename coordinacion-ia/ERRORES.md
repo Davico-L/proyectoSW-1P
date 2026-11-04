@@ -36,4 +36,28 @@ Este documento registra los errores técnicos, bloqueos, problemas de integraci�
 - **Solución / Mitigación**: Se añadió `"x-session-id"` a la lista `allowedHeaders` en la configuración de CORS existente, conservando intactos los demás orígenes, credenciales, métodos y cabeceras.
 - **Estado**: Resuelto
 
+---
+
+---
+
+### [ERR-004] Corrupción de codificación UTF-8 en archivos Dart por lectura/escritura ANSI en PowerShell
+- **Fecha**: 2026-10-30
+- **Componente / Módulo Afectado**: Mobile / `mobile-template/test/validador_test.dart` y `mobile-template/lib/main.dart`
+- **Descripción**: `flutter test` falló en 12 pruebas debido a cadenas con caracteres acentuados corrompidos en doble codificación/mojibake (ej. `'no entendÃ­'` en vez de `'no entendí'`, `'Plantilla MÃ³vil Inicial'` en vez de `'Plantilla Móvil Inicial'`).
+- **Causa Raíz**: El comando `Get-Content` / `Set-Content` en PowerShell 5.1 utilizó por defecto la codificación del sistema (Windows-1252/ANSI) en lugar de UTF-8 sin BOM al copiar y modificar archivos Dart.
+- **Solución / Mitigación**: Se reescribieron los archivos forzando explícitamente `System.Text.UTF8Encoding($false)` y copia directa de bytes binarios desde `llm_test`, logrando 54/54 tests pasando limpiamente.
+- **Estado**: Resuelto
+
+---
+
+### [ERR-005] Desborde de RenderFlex en widget_test.dart por apilamiento de botones en SampleHomeScreen
+- **Fecha**: 2026-10-30
+- **Componente / Módulo Afectado**: Mobile / `mobile-template/lib/main.dart`
+- **Descripción**: `flutter test` falló en `widget_test.dart: Sample screen renders smoke test` con `A RenderFlex overflowed by 55 pixels on the bottom` en `Column:file:///D:/proyectoSW-1P/mobile-template/lib/main.dart:41:18`.
+- **Causa Raíz**: Al agregarse un tercer botón (`Prueba de voz`) en `Column` dentro de `Center(child: Padding(...))`, la altura requerida superó la ventana de renderizado predeterminada de las pruebas de widget (800x600 px).
+- **Solución / Mitigación**: Se envolvió el contenido del cuerpo en `SingleChildScrollView(padding: const EdgeInsets.all(24.0), child: Column(...))` permitiendo desplazamiento elástico y eliminando desbordes en cualquier tamaño de pantalla.
+- **Estado**: Resuelto
+
+
+
 

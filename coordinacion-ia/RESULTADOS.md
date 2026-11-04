@@ -382,3 +382,163 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Pruebas Ejecutadas**:
   - Chequeo de tipos (`yarn --cwd frontend test:typecheck`): exitoso con código 0 (`tsc`).
   - Build de producción (`yarn --cwd frontend build`): exitoso con código 0 (`vite build`).
+
+
+---
+
+### [RES-044] Implementación del generador de app móvil (backend, mobile-template y frontend)
+- **Fecha**: 2026-10-31
+- **Tarea Asociada**: TSK-050
+- **Entregables Producidos**:
+  - `mobile-template/assets/esquema.json`: Esquema por defecto de barbería (`Cliente` y `Atencion`).
+  - `mobile-template/pubspec.yaml`: Declaración del asset `assets/esquema.json`.
+  - `mobile-template/lib/esquema/cargar_esquema.dart`: Función `cargarEsquema([AssetBundle?])` que lee `assets/esquema.json` con `rootBundle` y ante error o ausencia recurre a `esquemaBarberia`.
+  - `mobile-template/lib/pantallas/pantalla_voz.dart`: Adaptada para inicializarse con `cargarEsquema()` y configurar `_servicioIa.preparar(construirPrompt(esquema), esquemaValidador)`.
+  - `mobile-template/test/cargar_esquema_test.dart`: 2 pruebas unitarias (JSON válido y asset faltante/inválido con fallback).
+  - `backend/src/mobileGenerator/converter.ts`: Función `convertUmlModelToSchema` que mapea `UmlModel` al formato `esquema.json` (`String` -> `texto`, `number`/`int`/`float`/`double` -> `numero`, demás -> `otro`; relaciones `association`/`composition`/`aggregation` con `*` a `1` convertidas a `ref` al inicio; `inheritance`, `manyToMany` y relaciones `*` a `*` ignoradas).
+  - `backend/src/mobileGenerator/buildMobileZip.ts`: Empaquetador ZIP con `archiver` que excluye `build`, `.dart_tool`, `android/build`, `.gradle`, `.idea`, `node_modules` y `.gguf`; reemplaza `assets/esquema.json` y genera `LEEME.txt` con instrucciones completas en español.
+  - `backend/src/mobileGenerator/converter.test.ts`: 6 pruebas unitarias con `node:test` cubriendo barbería, tienda, tipos no soportados, exclusión de herencia/manyToMany/* a *, reglas de exclusión y generación de ZIP.
+  - `backend/src/routes/diagramRoutes.ts`: Endpoint `POST /diagrams/:id/generate-mobile` con la misma firma y validación que `generate-backend`.
+  - `backend/package.json`: Script `test` añadido para ejecución directa con `tsx --test`.
+  - `frontend/excalidraw-app/App.tsx`: Botón toolbar «Generar app móvil» con icono de dispositivo móvil, estado `isGeneratingMobile`, flujo de descarga de `generated-mobile.zip` y notificaciones Toast idénticas a CU5.
+- **Pruebas Ejecutadas**:
+  - `npm test` en `backend`: 6 tests ejecutados y aprobados (100% pass, 0 fail).
+  - `npm run typecheck` en `backend`: 0 errores TypeScript.
+  - `yarn test:typecheck` en `frontend`: 0 errores TypeScript.
+  - `flutter analyze` en `mobile-template`: 0 issues encontrados.
+  - `flutter test` en `mobile-template`: 80 tests ejecutados y aprobados (+79, 0 fallos).
+  - `git status --short`: Verificado estado limpio y consistente.
+
+
+---
+
+### [RES-045] Omisión de atributos id en mobileGenerator y migración de base por firma de esquema en Repositorio
+- **Fecha**: 2026-10-31
+- **Tarea Asociada**: TSK-051
+- **Entregables Producidos**:
+  - `backend/src/mobileGenerator/converter.ts`: Omisión estricta de cualquier atributo cuyo nombre en minúsculas sea exactamente "id" (`attrName.toLowerCase() === "id"`), permitiendo generar clases con lista vacía `campos: []` sin fallar.
+  - `backend/src/mobileGenerator/converter.test.ts`: Prueba unitaria verificando la omisión de atributos `id` e `ID` en distintas clases y la generación exitosa de clases con `campos: []`.
+  - `mobile-template/lib/datos/repositorio.dart`:
+    - Función estática `calcularFirma(Esquema)` basada en las sentencias DDL generadas.
+    - Persistencia de la firma en `esquema_firma.txt` junto a `app.db`.
+    - Detección de cambio de firma (o presencia de base sin firma) con rotación no destructiva de `app.db` a `app_anterior_<timestamp>.db` (incluyendo archivos auxiliares sqlite `-wal`, `-shm`, `-journal`).
+    - Apertura/recreación limpia de la nueva base de datos con las tablas del esquema activo y guardado de la firma nueva.
+    - Parámetros opcionales `directorioBases` y `abrirDbFn` para permitir inyección de dependencias y pruebas unitarias aisladas en disco.
+  - `mobile-template/test/repositorio_test.dart`: 3 pruebas unitarias completas respaldadas en archivos físicos verificando: (1) firma distinta con renombrado a `app_anterior_...`, nueva base vacía y preservación de registros en la base vieja; (2) firma igual con retención de datos sin rotación; (3) base preexistente sin archivo de firma tratada como firma distinta.
+- **Pruebas Ejecutadas**:
+  - `npm test` en `backend`: 7 tests ejecutados y aprobados (100% pass, 0 fail).
+  - `npm run typecheck` en `backend`: 0 errores TypeScript.
+  - `flutter analyze` en `mobile-template`: 0 issues encontrados.
+  - `flutter test` en `mobile-template`: 83 tests ejecutados y aprobados (+82, 0 fallos).
+  - `git status --short`: Verificado estado del repositorio.
+
+---
+
+### [RES-046] Implementación de interfaz ModelProvider y adaptadores Groq y Gemini (CU24 Fase 1 Paso 1)
+- **Fecha**: 2026-11-03
+- **Tarea Asociada**: TSK-052
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/types.ts`: Declaración de tipos `ProviderId` ("local" | "groq" | "gemini") e interfaz común `ModelProvider` exponiendo `id`, `label`, `isConfigured(): boolean` y `editDiagramByInstruction(currentModel, instruction): Promise<{ operations: any[] }>`.
+  - `backend/src/ai/providers/groqProvider.ts`: Adaptador `GroqProvider` que implementa `ModelProvider`, verifica la variable `GROQ_API_KEY` en `isConfigured()`, y delega a `editDiagramByInstructionGroq` de `backend/src/services/groq.ts` sin modificar el servicio original. Instancia exportada `groqProvider`.
+  - `backend/src/ai/providers/geminiProvider.ts`: Adaptador `GeminiProvider` que implementa `ModelProvider`, verifica `GEMINI_API_KEY` en `isConfigured()`, y delega a `editDiagramByInstruction` de `backend/src/services/gemini.ts` sin modificar el servicio original. Instancia exportada `geminiProvider`.
+  - `backend/src/ai/providers/index.ts`: Re-exportación de tipos y proveedores, registro interno y exportación de la función `getProvider(id: ProviderId | string): ModelProvider | undefined`.
+- **Archivos NO Modificados**:
+  - `diagramRoutes.ts`, `helpAssistant.ts`, `visionDiagram.ts`, `gemini.ts` y `groq.ts` se mantuvieron 100% intactos. `gemini.ts` sigue exportando `isTimeoutError` inalterado.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript, compilación exitosa (código 0).
+  - `git status --short`: Verificados únicamente los archivos creados en `backend/src/ai/providers/`.
+
+---
+
+### [RES-047] Reemplazo de selección de proveedor en diagramRoutes.ts con getProvider (CU24 Fase 1 Paso 2)
+- **Fecha**: 2026-11-03
+- **Tarea Asociada**: TSK-053
+- **Entregables Producidos**:
+  - `backend/src/routes/diagramRoutes.ts`:
+    - Eliminados imports en desuso `editDiagramByInstruction` (de `services/gemini.ts`) y `editDiagramByInstructionGroq` (de `services/groq.ts`).
+    - Añadido import `getProvider` desde `../ai/providers`.
+    - Conservado inalterado el import `isTimeoutError` desde `../services/gemini`.
+    - En `POST /diagrams/:id/ai-edit`, resolución de proveedor mediante `getProvider(configuredProvider === "gemini" ? "gemini" : "groq")`.
+    - Reemplazada la bifurcación ternaria por la invocación unificada `await provider.editDiagramByInstruction(currentModel, instructionToSend)`.
+    - Preservados al 100% el bloque catch, respuestas HTTP, validación semántica de operaciones y parámetros.
+- **Archivos NO Modificados**:
+  - `helpAssistant.ts`, `visionDiagram.ts`, `gemini.ts`, `groq.ts` y ningún otro archivo del backend o frontend fue tocado.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript (código 0).
+  - `npm --prefix backend test`: 7 tests pasados exitosamente (100% pass, 0 fail).
+  - `git diff backend/src/routes/diagramRoutes.ts`: Inspección y verificación de diff mínimo y exacto.
+
+---
+
+### [RES-048] Implementación de LocalProvider para servidor local tipo Colab (CU24 Fase 2 Paso 1)
+- **Fecha**: 2026-11-03
+- **Tarea Asociada**: TSK-054
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/localProvider.ts` (**nuevo**):
+    - Estado en memoria con `setLocalConfig({url, model})`, `getLocalConfig()` y `clearLocalConfig()`.
+    - Clase `LocalProvider` implementando `ModelProvider` con `id: "local"`, `label: "Local (Colab)"`.
+    - `isConfigured()` retorna `true` solo si `_localConfig` tiene `url` y `model` no vacíos.
+    - Prompt de sistema (`SYSTEM_PROMPT`) y esquema JSON (`editDiagramResponseSchema`) copiados literalmente desde `groq.ts` sin modificar ese archivo.
+    - Normalización de nulls copiada literalmente desde `groq.ts` (función interna `removeNullFields`).
+    - `editDiagramByInstruction`: llama a `POST {url}/v1/chat/completions` con `response_format: { type: "json_schema", ... }`; si el servidor responde HTTP 400, reintenta con `response_format: { type: "json_object" }`; timeout configurable via `LOCAL_AI_TIMEOUT_MS` (default 45000 ms); lanza `AI_TIMEOUT` si `AbortController` cancela, `INVALID_AI_RESPONSE` si el JSON es inválido o falta `operations`.
+    - Instancia singleton exportada `localProvider`.
+  - `backend/src/ai/providers/index.ts` (**modificado**):
+    - Añadido import y re-exportación de `LocalProvider` y `localProvider`.
+    - Proveedor `"local"` registrado en el `Map` interno.
+- **Archivos NO Modificados**:
+  - `groq.ts`, `gemini.ts`, `diagramRoutes.ts`, `helpAssistant.ts`, `visionDiagram.ts` y el resto del repositorio se mantuvieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript (código 0).
+
+---
+
+### [RES-049] Script de evaluación de modelo local backend/scripts/evalLocalModel.ts (CU24 Fase 2 Paso 2)
+- **Fecha**: 2026-11-03
+- **Tarea Asociada**: TSK-055
+- **Entregables Producidos**:
+  - `backend/scripts/evalLocalModel.ts` (**nuevo**):
+    - Validación de variables de entorno requeridas `LOCAL_EVAL_URL` y `LOCAL_EVAL_MODEL` con mensaje claro de uso y salida limpia si faltan.
+    - Modelo UML de ejemplo con clases `Cliente` y `Pedido` y relación `association` (multiplicidad `1` a `0..*`).
+    - Configuración en memoria con `setLocalConfig` y evaluación de las 12 instrucciones de edición estructurada sobre `localProvider.editDiagramByInstruction`.
+    - Medición de tiempos por instrucción (ms), reconocimiento de acciones (`createClass`, `updateClass`, `deleteClass`, `createRelation`, `updateRelation`, `deleteRelation`), validación semántica con la función pura `validateAndResolveOperations` de `operationValidator.ts` y captura de errores tipados (`INVALID_AI_RESPONSE` y `AI_TIMEOUT`).
+    - Evaluación de 3 preguntas conversacionales directas a `${url}/v1/chat/completions` (sin esquema) con prompt de desarrollador senior dirigiéndose por nombre (`Davico`, `Ana`, `Luis`), midiendo respuesta en español e inclusión del nombre.
+    - Presentación en terminal de tablas resumen para edición y conversación, y métricas totales (instrucciones válidas / 12, tiempos promedio y máximo, nombres / 3 y español / 3).
+    - Persistencia de resultados completos en `backend/scripts/eval-results.json`.
+  - `.gitignore` (**modificado**):
+    - Adición de `backend/scripts/eval-results.json` para evitar versionar los resultados de pruebas locales.
+- **Archivos NO Modificados**:
+  - Ningún otro archivo preexistente del repositorio fue modificado.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript (código 0).
+  - Ejecución de prueba con variables ausentes: comprobación de mensaje de error explicativo y código de salida 1.
+  - `npm --prefix backend test`: 7/7 tests aprobados (código 0).
+
+---
+
+### [RES-050] Endpoint de registro de modelo local POST /ai/providers/local/register (CU24 Fase 3 Paso 1)
+- **Fecha**: 2026-11-03
+- **Tarea Asociada**: TSK-056
+- **Entregables Producidos**:
+  - `backend/src/routes/aiProviderRoutes.ts` (**nuevo**):
+    - Router Express `aiProviderRouter` con `POST /local/register`.
+    - Autenticación por `x-registration-token` comparada con `process.env.AI_REGISTRATION_TOKEN` usando `crypto.timingSafeEqual`; responde 401 si falta la variable o el token no coincide. Nunca se imprime el token en logs.
+    - Validación de `url` (string no vacío, debe comenzar con `https://` o `http://localhost` solo en `NODE_ENV !== "production"`) y `model` (string no vacío). Responde 400 con detalle si falla.
+    - Probe de conectividad a `{url}/v1/chat/completions` con timeout de 3 s mediante `AbortController`; si no responde o HTTP >= 500 (excepto 400), responde 502 con `MODEL_UNREACHABLE` sin registrar nada.
+    - Tras validación exitosa, llama a `setLocalConfig({ url, model })` y responde 200 con `{ ok: true, provider: "local", model }`.
+  - `backend/src/app.ts` (**modificado**):
+    - Añadido import de `aiProviderRouter`.
+    - Añadido `x-registration-token` en `allowedHeaders` del middleware CORS.
+    - Montado `app.use("/ai/providers", aiProviderRouter)` sin alterar otras rutas.
+  - `backend/.env.example` (**modificado**):
+    - Documentadas las nuevas variables: `AI_PROVIDER`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `AI_REGISTRATION_TOKEN` y `LOCAL_AI_TIMEOUT_MS` (todas comentadas).
+- **Archivos NO Modificados**:
+  - `diagramRoutes.ts`, `helpAssistant.ts`, `groq.ts`, `gemini.ts` y todos los proveedores de IA se mantuvieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript (código 0).
+  - `npm --prefix backend test`: 7/7 tests aprobados (código 0).
+  - `git diff backend/src/app.ts`: Verificado diff mínimo y exacto (3 adiciones, 1 sustitución de línea).
+
+
+
+
+

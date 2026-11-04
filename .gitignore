@@ -41,3 +41,6 @@ lerna-debug.log*
 # Archivos del sistema operativo
 .DS_Store
 Thumbs.db
+
+# Evaluacion de modelos de IA (CU24)
+backend/scripts/eval-results.json

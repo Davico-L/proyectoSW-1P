@@ -27,6 +27,10 @@ Este documento clasifica el estado de avance de las funcionalidades, subsistemas
   - Generador de archivos de configuración de proyecto (`pom.xml`, `application.properties`, clase principal `Application.java`).
   - Generador de colección Postman v2.1 (`generatePostmanCollection.ts`).
   - Empaquetador `.zip` descargable mediante endpoint `POST /diagrams/:id/generate-backend`.
+- **Generador de Aplicación Móvil Flutter (CU13)**:
+  - Módulo conversor de `UmlModel` a `esquema.json` (`converter.ts`) con tipado estricto (`texto`, `numero`, `otro`, `ref`) y soporte de relaciones `association`/`composition`/`aggregation` con referencias primero.
+  - Empaquetador ZIP en memoria (`buildMobileZip.ts`) con exclusión de artefactos de compilación (`build`, `.dart_tool`, `android/build`, `.gradle`, `.idea`, `node_modules`) y pesos GGUF, con sustitución dinámica de `assets/esquema.json` y generación de `LEEME.txt`.
+  - Endpoint `POST /diagrams/:id/generate-mobile` con la misma autenticación y manejo de errores que CU5.
 - **Exportador XMI 2.1 (CU10)**: Módulo de serialización a estándar XMI 2.1 (`src/xmiExporter/`) con soporte de clases, tipos primitivos mapeados y relaciones, expuesto en `POST /diagrams/:id/export-xmi`.
 - **Motor de Edición por IA (CU7 / UC7)**:
   - Endpoint `POST /diagrams/:id/ai-edit`.
@@ -53,7 +57,7 @@ Este documento clasifica el estado de avance de las funcionalidades, subsistemas
   - Hook de gestión de mensajes `useAiChat.ts`.
   - Reconocimiento de voz mediante Web Speech API del navegador en `useSpeechRecognition.ts`.
   - Aplicador transaccional de operaciones sobre el lienzo de Excalidraw (`applyAiOperations.ts`) con actualización de enlaces y flechas.
-- **Integración con Backend en Canvas**: Botones integrados en la barra de herramientas y menú principal para "Generar Backend", "Exportar a XMI", "Importar desde XMI", "Mis diagramas" y cierre de sesión.
+- **Integración con Backend en Canvas**: Botones integrados en la barra de herramientas y menú principal para "Generar Backend", "Generar app móvil", "Exportar a XMI", "Importar desde XMI", "Mis diagramas" y cierre de sesión.
 - **Desactivación de Sincronización LocalStorage Inconsistente**: Cumplimiento del ADR 006 para evitar pérdida de datos al cambiar de pestaña.
 
 ---
@@ -61,7 +65,7 @@ Este documento clasifica el estado de avance de las funcionalidades, subsistemas
 ## 2. Parcial (Implementado con Alcance o Limitaciones Específicas)
 
 - **Selección de Proveedor de IA**: Se implementaron dos proveedores (Groq y Gemini), pero la alternancia se realiza estáticamente vía variable de entorno `AI_PROVIDER` en el backend; no existe fallback dinámico en tiempo de ejecución si el proveedor activo agota su cuota.
-- **Módulo Móvil (`mobile-template`)**: El proyecto Flutter compila y contiene los plugins nativos `sqflite` y `speech_to_text` verificados en `pubspec.yaml`, pero solo dispone de una pantalla estática informativa (`SampleHomeScreen`) sin comunicación con la API backend ni representación de diagramas.
+- **Módulo Móvil (`mobile-template`)**: El proyecto Flutter contiene los plugins nativos `sqflite`, `speech_to_text: ^7.4.0`, `path_provider: ^2.1.6`, `fcllama: ^0.0.3`, `http: ^1.2.2` y `connectivity_plus: ^6.0.5` con `largeHeap="true"`, `usesCleartextTraffic="true"`, y permisos `RECORD_AUDIO` e `INTERNET`. Dispone de pantallas de inicio (`SampleHomeScreen`), prueba de datos SQLite (`PruebaDatosScreen`), prueba de IA local (`PruebaIaScreen`) con selector sincronizado de prompt y esquema, prueba de voz técnica (`PruebaVozScreen`) y asistente de voz para usuario final (`PantallaVoz`) con sincronización HTTP contra backend Spring Boot. Incluye motor de persistencia relacional con esquema DDL dinámico y migración por firma (`lib/datos/repositorio.dart`), módulo de sincronización simple con backend generado (`lib/sync/`), servicio singleton de IA local (`lib/ia/servicio_ia.dart`), generador dinámico de prompts (`lib/ia/prompt_generado.dart`), validador fonético-semántico (`lib/ia/validador.dart`), formateador de lenguaje natural (`lib/ia/resumen.dart`), ejecutor de inferencia GGUF (`lib/ia/interprete.dart`) y servicio reactivo de reconocimiento de voz offline (`lib/voz/servicio_voz.dart`), verificado con 83 pruebas unitarias.
 
 ---
 

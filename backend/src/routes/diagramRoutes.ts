@@ -9,8 +9,8 @@ import {
 import { extractUmlModel } from "../backendGenerator/extractModel";
 import { buildBackendZip } from "../backendGenerator/buildZip";
 import { buildMobileZip } from "../mobileGenerator/buildMobileZip";
-import { editDiagramByInstruction, isTimeoutError } from "../services/gemini";
-import { editDiagramByInstructionGroq } from "../services/groq";
+import { isTimeoutError } from "../services/gemini";
+import { getProvider } from "../ai/providers";
 import { validateAndResolveOperations } from "../services/operationValidator";
 import { generateXmiDocument } from "../xmiExporter/generateXmi";
 import { handleAiFromImage } from "./aiVisionRoutes";
@@ -270,8 +270,10 @@ diagramRouter.post("/:id/ai-from-image", handleAiFromImage);
 
 // POST /diagrams/:id/ai-edit: Editar diagrama mediante instrucciones en lenguaje natural usando IA
 diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<void> => {
-  const provider = (process.env.AI_PROVIDER || "groq").toLowerCase();
-  console.log(`[AI-EDIT] Proveedor: ${provider}`);
+  const configuredProvider = (process.env.AI_PROVIDER || "groq").toLowerCase();
+  const providerId = configuredProvider === "gemini" ? "gemini" : "groq";
+  const provider = getProvider(providerId) || getProvider("groq")!;
+  console.log(`[AI-EDIT] Proveedor: ${configuredProvider}`);
 
   try {
     const { id } = req.params;
@@ -339,10 +341,7 @@ diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<
       : instruction.trim();
 
     // 5. Llamar al proveedor de IA configurado
-    const result =
-      provider === "gemini"
-        ? await editDiagramByInstruction(currentModel, instructionToSend)
-        : await editDiagramByInstructionGroq(currentModel, instructionToSend);
+    const result = await provider.editDiagramByInstruction(currentModel, instructionToSend);
     console.log("[UC7 DEBUG] editDiagramByInstruction OK"); // TEMP UC7 DEBUG
 
     // 5. Validar y resolver operaciones contra las clases existentes

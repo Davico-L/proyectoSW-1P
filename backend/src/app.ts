@@ -5,6 +5,7 @@ import { sessionRouter } from "./routes/sessionRoutes";
 import { diagramRouter } from "./routes/diagramRoutes";
 import { authRouter } from "./routes/authRoutes";
 import { helpRouter } from "./routes/helpRoutes";
+import { aiProviderRouter } from "./routes/aiProviderRoutes";
 
 export const app: Application = express();
 
@@ -26,7 +27,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-session-id"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-session-id", "x-registration-token"],
   })
 );
 
@@ -39,6 +40,7 @@ app.use("/session", sessionRouter);
 app.use("/diagrams", diagramRouter);
 app.use("/auth", authRouter);
 app.use("/help", helpRouter);
+app.use("/ai/providers", aiProviderRouter);
 
 // Ruta raíz informativa
 app.get("/", (_req: Request, res: Response) => {
