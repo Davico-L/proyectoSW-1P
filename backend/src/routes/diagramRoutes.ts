@@ -10,7 +10,7 @@ import { extractUmlModel } from "../backendGenerator/extractModel";
 import { buildBackendZip } from "../backendGenerator/buildZip";
 import { buildMobileZip } from "../mobileGenerator/buildMobileZip";
 import { isTimeoutError } from "../services/gemini";
-import { getProvider } from "../ai/providers";
+import { editWithFallback, getActiveProviderId } from "../ai/providers";
 import { validateAndResolveOperations } from "../services/operationValidator";
 import { generateXmiDocument } from "../xmiExporter/generateXmi";
 import { handleAiFromImage } from "./aiVisionRoutes";
@@ -270,10 +270,7 @@ diagramRouter.post("/:id/ai-from-image", handleAiFromImage);
 
 // POST /diagrams/:id/ai-edit: Editar diagrama mediante instrucciones en lenguaje natural usando IA
 diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<void> => {
-  const configuredProvider = (process.env.AI_PROVIDER || "groq").toLowerCase();
-  const providerId = configuredProvider === "gemini" ? "gemini" : "groq";
-  const provider = getProvider(providerId) || getProvider("groq")!;
-  console.log(`[AI-EDIT] Proveedor: ${configuredProvider}`);
+  console.log(`[AI-EDIT] Proveedor activo: ${getActiveProviderId()}`);
 
   try {
     const { id } = req.params;
@@ -340,8 +337,8 @@ diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<
         instruction.trim()
       : instruction.trim();
 
-    // 5. Llamar al proveedor de IA configurado
-    const result = await provider.editDiagramByInstruction(currentModel, instructionToSend);
+    // 5. Llamar a la IA con respaldo automático
+    const result = await editWithFallback(currentModel, instructionToSend);
     console.log("[UC7 DEBUG] editDiagramByInstruction OK"); // TEMP UC7 DEBUG
 
     // 5. Validar y resolver operaciones contra las clases existentes
@@ -352,8 +349,21 @@ diagramRouter.post("/:id/ai-edit", async (req: Request, res: Response): Promise<
     console.log(`[UC7 DEBUG] Validation OK - validOperations: ${validOperations.length}, warnings: ${warnings.length}`); // TEMP UC7 DEBUG
 
     console.log("[UC7 DEBUG] Sending HTTP 200"); // TEMP UC7 DEBUG
-    res.status(200).json({ validOperations, warnings });
+    res.status(200).json({
+      validOperations,
+      warnings,
+      provider: result.provider,
+      fallback: result.fallback,
+    });
   } catch (error: any) {
+    if (error?.message === "AI_ALL_PROVIDERS_FAILED") {
+      res.status(503).json({
+        error: "AI_SERVICE_UNAVAILABLE",
+        message: "La IA no está disponible por ahora",
+      });
+      return;
+    }
+
     if (error instanceof Error && error.message === "INVALID_AI_RESPONSE") {
       res.status(422).json({
         error: "No se pudo interpretar la instrucción, intentá reformularla",

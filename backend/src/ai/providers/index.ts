@@ -7,6 +7,7 @@ export * from "./types";
 export * from "./groqProvider";
 export * from "./geminiProvider";
 export * from "./localProvider";
+export * from "./providerManager";
 
 const providers: Map<ProviderId, ModelProvider> = new Map<ProviderId, ModelProvider>([
   ["groq", groqProvider],

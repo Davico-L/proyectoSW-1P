@@ -6,6 +6,26 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-058
+- **Nombre**: Endpoints GET /ai/providers y PUT /ai/providers/active para listar y cambiar proveedor activo (CU24 Fase 4 Paso 2)
+- **Fecha de Inicio**: 2026-11-04
+- **Estado**: Completada
+- **Objetivo**: En providerManager.ts dar soporte a forceRefresh en checkProviderHealth y función listProviders(). En aiProviderRoutes.ts implementar GET /ai/providers (devuelve [{ id, label, available, active, model }], available de health check 30s o refresh=1 forzado, sin URLs ni claves) y PUT /ai/providers/active (valida id, comprobación fresca de disponibilidad; si falla 409 PROVIDER_UNAVAILABLE dejando activo anterior, si responde actualiza activo y 200 { ok: true, active: id }). Ambos protegidos por middleware de sesión (401 si no hay sesión válida). No alterar POST /local/register ni otros archivos.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-057
+- **Nombre**: Implementación de respaldo automático entre proveedores y conexión con ai-edit (CU24 Fase 4 Paso 1)
+- **Fecha de Inicio**: 2026-11-03
+- **Estado**: Completada
+- **Objetivo**: Crear backend/src/ai/providers/providerManager.ts con estado en memoria del proveedor activo (inicializado según AI_PROVIDER: gemini, local o groq), health check con caché de 30s (ping con 3s a local; isConfigured() para groq y gemini), función editWithFallback(currentModel, instruction) con orden de respaldo local -> groq -> gemini (gemini solo si isConfigured()), reintento único ante INVALID_AI_RESPONSE o error de conexión, salto sin reintento ante AI_TIMEOUT de local, error AI_ALL_PROVIDERS_FAILED si todos fallan por indisponibilidad. En diagramRoutes.ts usar editWithFallback, añadir provider y fallback al JSON 200, y mapear AI_ALL_PROVIDERS_FAILED a 503 AI_SERVICE_UNAVAILABLE. No tocar helpAssistant.ts, visionDiagram.ts, groq.ts, gemini.ts, localProvider.ts ni aiProviderRoutes.ts.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-056
 - **Nombre**: Endpoint de registro de modelo local POST /ai/providers/local/register (CU24 Fase 3 Paso 1)
 - **Fecha de Inicio**: 2026-11-03

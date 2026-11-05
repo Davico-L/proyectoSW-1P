@@ -538,6 +538,60 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix backend test`: 7/7 tests aprobados (código 0).
   - `git diff backend/src/app.ts`: Verificado diff mínimo y exacto (3 adiciones, 1 sustitución de línea).
 
+---
+
+### [RES-051] Respaldo automático entre proveedores y conexión con ai-edit (CU24 Fase 4 Paso 1)
+- **Fecha**: 2026-11-03
+- **Tarea Asociada**: TSK-057
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/providerManager.ts` (**nuevo**):
+    - Estado en memoria del proveedor activo (`activeProviderId`), inicializado según `AI_PROVIDER` (si es "gemini" o "local" usa ese, cualquier otro o vacío usa "groq"). Funciones `getActiveProviderId()` y `setActiveProviderId()`.
+    - Health check por proveedor con caché en memoria de 30 s: para `local` realiza ping mínimo a `{url}/v1/chat/completions` con timeout estricto de 3 s; para `groq` y `gemini` verifica `isConfigured()`.
+    - Función `editWithFallback(currentModel, instruction)`:
+      - Orden de respaldo: `local → groq → gemini` (y gemini solo si `isConfigured()`).
+      - Si el health check indica no disponible, salta el proveedor sin invocarlo.
+      - Reintento único ante `INVALID_AI_RESPONSE` o error de conexión.
+      - Salto inmediato sin reintento ante `AI_TIMEOUT` del proveedor local.
+      - Retorno de `{ operations, provider, fallback }` (con `fallback: true` cuando no fue el proveedor activo).
+      - Registro en consola del proveedor que atendió la consulta y si hubo respaldo (sin tokens ni claves).
+      - Si todos fallan por indisponibilidad, lanza el error `AI_ALL_PROVIDERS_FAILED`. Si alguno falló por formato inválido, relanza el último error.
+  - `backend/src/ai/providers/index.ts` (**modificado**):
+    - Re-exportación de `providerManager.ts`.
+  - `backend/src/routes/diagramRoutes.ts` (**modificado**):
+    - Reemplazada la llamada directa por `editWithFallback(currentModel, instructionToSend)`.
+    - Añadidos los campos `provider` y `fallback` a la respuesta JSON 200 sin quitar ni renombrar `validOperations` ni `warnings`.
+    - Mapeo en el bloque catch de `AI_ALL_PROVIDERS_FAILED` a HTTP 503 con `{ error: "AI_SERVICE_UNAVAILABLE", message: "La IA no está disponible por ahora" }`.
+- **Archivos NO Modificados**:
+  - `helpAssistant.ts`, `visionDiagram.ts`, `groq.ts`, `gemini.ts`, `localProvider.ts` y `aiProviderRoutes.ts` permanecieron intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript (código 0).
+  - `npm --prefix backend test`: 7/7 tests aprobados (código 0).
+  - `git diff backend/src/routes/diagramRoutes.ts`: Verificada integración limpia sin alterar validación ni flujo.
+
+---
+
+### [RES-052] Endpoints para listar y cambiar proveedor activo GET /ai/providers y PUT /ai/providers/active (CU24 Fase 4 Paso 2)
+- **Fecha**: 2026-11-04
+- **Tarea Asociada**: TSK-058
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/providerManager.ts` (**modificado**):
+    - Parámetro opcional `forceRefresh = false` en `checkProviderHealth(id, forceRefresh)` para saltar la caché de 30 s ante solicitudes explícitas.
+    - Constantes exportadas de modelos estándar `GROQ_MODEL_NAME = "openai/gpt-oss-20b"` y `GEMINI_MODEL_NAME = "gemini-3.6-flash"`.
+    - Interfaz `ProviderInfo` y función `listProviders(forceRefresh = false)` que itera por `["local", "groq", "gemini"]` devolviendo `{ id, label, available, active, model }` sin exponer URL de túneles ni credenciales.
+  - `backend/src/routes/aiProviderRoutes.ts` (**modificado**):
+    - Middleware `requireUserSession` que valida `x-session-id` o `authorization` contra `getSession()`, retornando 401 `{ error: "No autenticado" }` si falta o no existe.
+    - Endpoint `GET /ai/providers`: protegido por sesión, acepta `?refresh=1` para forzar comprobación de salud fresca y devuelve la lista de proveedores.
+    - Endpoint `PUT /ai/providers/active`: protegido por sesión, valida que `id` sea `"local" | "groq" | "gemini"` (400 si es inválido), ejecuta comprobación fresca de salud (`checkProviderHealth(id, true)`); responde 409 `{ error: "PROVIDER_UNAVAILABLE", message: "El modelo seleccionado no está disponible" }` si no responde dejando el activo intacto; o actualiza el activo en memoria con `setActiveProviderId(id)` y responde 200 `{ ok: true, active: id }`.
+  - Inalterado `POST /ai/providers/local/register` que continúa autenticado únicamente por `x-registration-token`.
+- **Archivos NO Modificados**:
+  - `diagramRoutes.ts`, `helpAssistant.ts`, `groq.ts`, `gemini.ts`, `localProvider.ts` y `visionDiagram.ts` permanecieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run build` (`tsc`): 0 errores TypeScript (código 0).
+  - `npm --prefix backend test`: 7/7 tests aprobados (código 0).
+  - `git diff backend/src/routes/aiProviderRoutes.ts`: Verificada implementación limpia de GET y PUT junto a POST /local/register existente.
+
+
+
 
 
 

@@ -8,11 +8,118 @@
  *   — Nunca se imprimen ni registran tokens, claves ni su contenido parcial en logs.
  */
 
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import crypto from "crypto";
-import { setLocalConfig } from "../ai/providers";
+import {
+  setLocalConfig,
+  listProviders,
+  checkProviderHealth,
+  setActiveProviderId,
+} from "../ai/providers";
+import { getSession } from "../services/sessionService";
 
 export const aiProviderRouter = Router();
+
+// Middleware de autenticación de sesión de usuario para GET / y PUT /active
+async function requireUserSession(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const sessionId = (req.headers["x-session-id"] ||
+    req.headers["authorization"]?.replace(/^Bearer\s+/i, "")) as string;
+
+  if (!sessionId || typeof sessionId !== "string" || sessionId.trim() === "") {
+    res.status(401).json({ error: "No autenticado" });
+    return;
+  }
+
+  const session = await getSession(sessionId.trim());
+  if (!session) {
+    res.status(401).json({ error: "No autenticado" });
+    return;
+  }
+
+  next();
+}
+
+/**
+ * GET /ai/providers
+ *
+ * Query: ?refresh=1 (opcional, para forzar comprobación fresca de salud)
+ * Header: x-session-id
+ *
+ * Respuestas:
+ *   200  [{ id, label, available, active, model }, ...]
+ *   401  { error: "No autenticado" }
+ */
+aiProviderRouter.get(
+  "/",
+  requireUserSession,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const forceRefresh = req.query.refresh === "1";
+      const providers = await listProviders(forceRefresh);
+      res.status(200).json(providers);
+    } catch (error: any) {
+      console.error("[aiProviderRoutes] Error en GET /ai/providers:", error);
+      res.status(500).json({
+        error: "INTERNAL_SERVER_ERROR",
+        message: "Error al listar proveedores",
+      });
+    }
+  }
+);
+
+/**
+ * PUT /ai/providers/active
+ *
+ * Body: { "id": "local" | "groq" | "gemini" }
+ * Header: x-session-id
+ *
+ * Respuestas:
+ *   200  { ok: true, active: id }
+ *   400  { error: "INVALID_INPUT", message: "..." }
+ *   401  { error: "No autenticado" }
+ *   409  { error: "PROVIDER_UNAVAILABLE", message: "El modelo seleccionado no está disponible" }
+ */
+aiProviderRouter.put(
+  "/active",
+  requireUserSession,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.body ?? {};
+
+      if (id !== "local" && id !== "groq" && id !== "gemini") {
+        res.status(400).json({
+          error: "INVALID_INPUT",
+          message: "El campo 'id' debe ser 'local', 'groq' o 'gemini'.",
+        });
+        return;
+      }
+
+      // Verifica el proveedor con una comprobación nueva (sin usar el valor guardado)
+      const isHealthy = await checkProviderHealth(id, true);
+      if (!isHealthy) {
+        res.status(409).json({
+          error: "PROVIDER_UNAVAILABLE",
+          message: "El modelo seleccionado no está disponible",
+        });
+        return;
+      }
+
+      setActiveProviderId(id);
+      console.log(`[aiProviderRoutes] Proveedor activo cambiado a: ${id}`);
+      res.status(200).json({ ok: true, active: id });
+    } catch (error: any) {
+      console.error("[aiProviderRoutes] Error en PUT /ai/providers/active:", error);
+      res.status(500).json({
+        error: "INTERNAL_SERVER_ERROR",
+        message: "Error al cambiar proveedor activo",
+      });
+    }
+  }
+);
 
 // Tiempo máximo (ms) para el probe de conectividad antes de registrar el modelo
 const PROBE_TIMEOUT_MS = 3000;
