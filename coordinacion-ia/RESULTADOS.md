@@ -590,6 +590,189 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix backend test`: 7/7 tests aprobados (código 0).
   - `git diff backend/src/routes/aiProviderRoutes.ts`: Verificada implementación limpia de GET y PUT junto a POST /local/register existente.
 
+---
+
+### [RES-059] Instalación y Módulo de Conexión a MongoDB Atlas (CU18 Fase 1)
+- **Fecha**: 2026-11-05
+- **Tarea Asociada**: TSK-059
+- **Entregables Producidos**:
+  - `backend/package.json` y `package-lock.json` (**modificados**): Instalación de la dependencia oficial `mongodb` (v7.8.0).
+  - `backend/src/db/mongo.ts` (**creado**):
+    - Cliente singleton `MongoClient` reutilizable con lectura de `MONGODB_URI` y opcional `MONGODB_DB_NAME`.
+    - Función `getMongoDb(dbName?)`: Retorna la base de datos `Db` o `null` si la conexión no está activa.
+    - Función `getMongoClient()`: Retorna la instancia del cliente `MongoClient` o `null`.
+    - Función `checkMongoConnection()`: Conexión y verificación tolerante a fallos mediante ping (`admin.command({ ping: 1 })`), con timeout de 4 segundos (`serverSelectionTimeoutMS: 4000`), midiendo latencia y retornando `{ connected, latencyMs, message }` sin lanzar excepciones no controladas.
+    - Función `closeMongoConnection()`: Cierre seguro del cliente para finalización ordenada del servidor.
+  - `backend/.env.example` (**modificado**): Adición de la variable `MONGODB_URI=` documentada para Atlas.
+  - `backend/src/index.ts` (**modificado**):
+    - Al arrancar `server.listen`, invoca `checkMongoConnection()` de forma asíncrona sin bloquear el inicio del servidor Express, Postgres ni Socket.IO.
+    - En caso de indisponibilidad o falta de variable, emite un `console.warn` claro sin interrumpir el funcionamiento normal.
+    - En `handleShutdown`, añade `closeMongoConnection()` para liberación de recursos.
+- **Archivos NO Modificados**:
+  - `backend/src/socket.ts`, servicios de sincronización, base de datos Postgres y el frontend permanecieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - Comprobación con `MONGODB_URI` no definida: Retorna `{ connected: false, message: 'Variable MONGODB_URI no configurada o vacía en el entorno' }`.
+  - Comprobación con `MONGODB_URI` mal formada / inalcanzable: Retorna `{ connected: false, message: '...', latencyMs: ... }` sin bloquear ni provocar excepciones no capturadas.
+  - Arranque del servidor `index.ts`: Servidor arranca de forma inmediata en el puerto configurado registrando aviso en consola de forma limpia sin afectar a PostgreSQL ni Socket.IO.
+
+---
+
+### [RES-060] Repositorio de Mensajes de Chat y Reintento de Conexión en MongoDB (CU18 Fase 2)
+- **Fecha**: 2026-11-05
+- **Tarea Asociada**: TSK-060
+- **Entregables Producidos**:
+  - `backend/src/db/mongo.ts` (**modificado**):
+    - `getMongoDb(dbName?)`: Ahora es asíncrono y reintenta conectar de forma segura si la conexión aún no existe o falló previamente, sin retener clientes rotos en caché ni arrojar excepciones no controladas.
+    - `resolveDefaultDbName(uri?)`: Extrae el nombre de base de datos de la URI o retorna `"classdraw"` por defecto si la URI no incluye base de datos.
+    - `checkMongoConnection()`: Detecta clientes en caché desconectados mediante ping y los recicla limpiamente para reconectar.
+  - `backend/src/chat/chatRepository.ts` (**creado**):
+    - Clases de error `ChatValidationError` y `ChatUnavailableError`.
+    - `saveMessage(input)`: Recorta espacios, valida diagramId/authorSessionId/authorName y texto no vacío, rechaza textos mayores a 2000 caracteres, asigna `createdAt` (Date), inserta en `chat_messages` y retorna el documento con `id` como string.
+    - `listMessages(diagramId, limit)`: Consulta los últimos mensajes de un diagrama por `createdAt: -1`, los invierte a orden cronológico ascendente, con `limit` por defecto 50 y tope de 100.
+    - `ensureChatIndexes(collection)`: Crea de forma idempotente el índice `{ diagramId: 1, createdAt: 1 }`.
+    - Manejo de fallos: Lanza `ChatUnavailableError` ante falta de conexión a Mongo o errores de red.
+  - `backend/src/chat/chatRepository.test.ts` (**creado**):
+    - Suite de 7 pruebas unitarias completas:
+      1. Guardar y listar mensaje exitosamente.
+      2. Orden cronológico ascendente.
+      3. Límite de mensajes por defecto 50 y tope máximo 100.
+      4. Rechazo controlado de texto vacío o con solo espacios.
+      5. Validación estricta de 2000 (válido) y 2001 (inválido) caracteres.
+      6. Dos diagramas distintos sin mezclar mensajes.
+      7. Error controlado sin Mongo (`ChatUnavailableError`).
+      8. Limpieza de documentos de prueba en base de datos tras la ejecución.
+  - `backend/package.json` (**modificado**): Script `"test"` actualizado para incluir `src/chat/chatRepository.test.ts`.
+- **Archivos NO Modificados**:
+  - `socket.ts`, rutas de Express y frontend permanecieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - `npm --prefix backend test`: 14/14 tests aprobados (7 de converter + 7 de chatRepository, código 0).
+
+---
+
+### [RES-061] Eventos de Socket chat-join y chat-message para Chat de Equipo (CU18 Fase 3 Paso 1)
+- **Fecha**: 2026-11-05
+- **Tarea Asociada**: TSK-061
+- **Entregables Producidos**:
+  - `backend/src/socket.ts` (**modificado**):
+    - Se agregaron los manejadores de eventos `chat-join` y `chat-message` preservando intactos los eventos existentes (`join-diagram`, `leave-diagram`, `diagram-update`, `diagram-state`).
+    - Evento `chat-join`: Valida payload no vacío (`bad_request`), comprueba pertenencia del socket a la sala del diagrama con `socket.rooms.has(diagramId)` (`not_in_room`), valida sesión contra PostgreSQL con `getSession` (`invalid_session`) y almacena en `socket.data` `{ diagramId, sessionId, authorName: session.username }`, respondiendo `{ ok: true }`.
+    - Evento `chat-message`: Exige pertenencia y correspondencia con `socket.data.diagramId` y `socket.rooms.has(diagramId)` (`not_joined`), valida sesión contra Postgres con `sessionExists` (`invalid_session`), garantiza que `authorSessionId` y `authorName` provengan exclusivamente de `socket.data` (inmune a suplantación desde el payload), valida texto no vacío (`empty`) y máx 2000 caracteres (`too_long`), persiste con `saveMessage` usando role `"user"` y manejo controlado de `ChatUnavailableError` (`unavailable`), emite `chat-message` a toda la sala mediante `io.to(diagramId).emit(...)` y confirma al remitente con `{ ok: true }`.
+  - `backend/src/chat/socketChatEvents.test.ts` (**creado**):
+    - Suite de 7 pruebas unitarias completas:
+      1. `chat-join` rechaza con `bad_request` ante parámetros nulos, vacíos o ausentes.
+      2. `chat-join` rechaza con `not_in_room` si el socket no ha ingresado a la sala del diagrama.
+      3. `chat-join` rechaza con `invalid_session` si la sesión no existe en base de datos.
+      4. `chat-join` exitoso almacena `diagramId`, `sessionId` y `authorName` en `socket.data`.
+      5. `chat-message` rechaza con `not_joined` si el socket no completó `chat-join` para esa sala.
+      6. `chat-message` valida `empty` y `too_long` (más de 2000 caracteres).
+      7. `chat-message` guarda mensaje, emite a la sala y aplica estrictamente la identidad del autor de `socket.data` ignorando datos fraudulentos del payload.
+  - `backend/package.json` (**modificado**): Script `"test"` ampliado para ejecutar los tres conjuntos de tests.
+- **Archivos NO Modificados**:
+  - Frontend, rutas de Express y tablas de PostgreSQL permanecieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - `npm --prefix backend test`: 21/21 tests aprobados (7 converter + 7 chatRepository + 7 socketChatEvents, código 0).
+
+---
+
+### [RES-062] Endpoint GET /diagrams/:id/chat para Historial de Mensajes (CU18 Fase 3 Paso 2)
+- **Fecha**: 2026-11-05
+- **Tarea Asociada**: TSK-062
+- **Entregables Producidos**:
+  - `backend/src/routes/diagramRoutes.ts` (**modificado**):
+    - Implementación del endpoint `GET /diagrams/:id/chat?limit=50`.
+    - Validación del encabezado `x-session-id` contra `getSession` (401 `{ error: "No autenticado" }` si falta o no existe).
+    - Verificación de existencia del diagrama con `getDiagramById(id)` (404 `{ error: "Diagrama no encontrado." }`), siguiendo estrictamente el mismo patrón de los demás endpoints del router sin inventar permisos artificiales de acceso/propiedad.
+    - Validación de `limit` opcional (por defecto 50, máx 100): si viene definido y no es un entero positivo (`/^\d+$/` > 0), responde 400 `{ error: "El parámetro 'limit' debe ser un número entero positivo." }`.
+    - Llamada asíncrona a `listMessages(id, limit)` de `chatRepository.ts`, devolviendo HTTP 200 `{ messages: [...] }` en orden cronológico ascendente y formato idéntico al evento `chat-message`.
+    - Mapeo de `ChatUnavailableError` a HTTP 503 `{ error: "chat_unavailable" }`.
+  - `backend/src/chat/diagramChatEndpoint.test.ts` (**creado**):
+    - Suite de 6 pruebas de integración HTTP:
+      1. Sin encabezado `x-session-id` responde 401.
+      2. Con sesión inexistente en `x-session-id` responde 401.
+      3. Con diagrama inexistente responde 404.
+      4. Con `limit` inválido (0, negativos, cadenas o decimales) responde 400.
+      5. Con sesión válida y diagrama válido responde 200 con mensajes en orden cronológico ascendente y estructura idéntica a `chat-message`.
+      6. Con `limit=2` responde exactamente los últimos 2 mensajes.
+  - `backend/package.json` (**modificado**): Script `"test"` ampliado para ejecutar los cuatro conjuntos de tests.
+- **Archivos NO Modificados**:
+  - `socket.ts`, frontend y base de datos relacional permanecieron 100% intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - `npm --prefix backend test`: 27/27 tests aprobados (7 converter + 7 chatRepository + 7 socketChatEvents + 6 diagramChatEndpoint, código 0).
+
+---
+
+### [RES-063] Sanitización de Mensajes de Chat Omitiendo authorSessionId (CU18 Ajuste de Seguridad)
+- **Fecha**: 2026-11-05
+- **Tarea Asociada**: TSK-063
+- **Entregables Producidos**:
+  - `backend/src/chat/chatRepository.ts` (**modificado**):
+    - Definición de interfaz `PublicChatMessage` `{ id, diagramId, authorName, role, text, createdAt, mentions?, proposal? }`.
+    - Función compartida `toPublicChatMessage(doc)`: Extrae y retorna únicamente las propiedades públicas, omitiendo de forma estricta `authorSessionId` (credencial sensible del usuario).
+  - `backend/src/socket.ts` (**modificado**):
+    - En el manejador `chat-message`, antes de emitir a la sala, convierte el documento guardado con `toPublicChatMessage(savedDoc)` asegurando que ningún socket de la sala reciba el `authorSessionId`.
+  - `backend/src/routes/diagramRoutes.ts` (**modificado**):
+    - En `GET /diagrams/:id/chat`, transforma los documentos retornados por `listMessages` mediante `messages.map(toPublicChatMessage)` antes de serializar el JSON de respuesta.
+  - `backend/src/chat/chatRepository.test.ts` (**modificado**):
+    - Agregada prueba unitaria específica para `toPublicChatMessage` validando la ausencia estricta de `authorSessionId` tanto en valor como en clave (`!('authorSessionId' in publicDoc)`).
+  - `backend/src/chat/socketChatEvents.test.ts` y `backend/src/chat/diagramChatEndpoint.test.ts` (**modificados**):
+    - Pruebas ajustadas para verificar que tanto el broadcast del socket como la respuesta HTTP no incluyan `authorSessionId`.
+- **Archivos NO Modificados**:
+  - Frontend, base de datos relacional y configuración general permanecieron intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - `npm --prefix backend test`: 28/28 tests aprobados (código 0).
+
+---
+
+### [RES-064] Panel de Chat del Equipo en Frontend con Sincronización y Reintentos (CU18 Fase 4)
+- **Fecha**: 2026-11-05
+- **Tarea Asociada**: TSK-064
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/types.ts` (**creado**):
+    - Tipado para `PublicChatMessage` `{ id, diagramId, authorName, role, text, createdAt, mentions?, proposal? }`.
+  - `frontend/src/teamChat/useTeamChat.ts` (**creado**):
+    - Hook de gestión de chat del equipo que reutiliza el singleton `socket` de `realtimeSync.ts`.
+    - Manejo de ciclo de vida: permanece montado mientras haya diagrama activo.
+    - Emisión de `chat-join` `{ diagramId, sessionId }` (desde `localStorage` `active_session_id`) al conectar, reconectar y cambiar de diagrama.
+    - Estrategia de reintento: ante respuesta `not_in_room`, reintenta automáticamente cada 500 ms hasta 5 veces para solventar condiciones de carrera cuando `join-diagram` toma algunos milisegundos.
+    - Carga de historial mediante `GET /diagrams/:id/chat?limit=50` con encabezado `x-session-id`, fusionando mensajes sin duplicar por `id`.
+    - Recepción en tiempo real de `chat-message`, deduplicando por `id` y descartando mensajes de otros diagramas.
+    - Contador de mensajes no leídos (`unreadCount`) mientras el panel está cerrado, reseteado al abrir.
+    - Envío de mensajes con `chat-message` `{ diagramId, text }`: preserva el texto ingresado ante errores y vacía el textarea únicamente si la respuesta fue `{ ok: true }`.
+    - Manejo de errores en español y emisión de evento global `session-invalid` ante `invalid_session` (401 o callback de socket).
+  - `frontend/src/teamChat/TeamChatButton.tsx` (**creado**):
+    - Botón flotante circular (50x50 px) ubicado en `bottom: 72px; right: 86px;` (a la izquierda de `AiChatButton` sin solapamiento).
+    - Icono de equipo/colaboración, estado abierto con "X", y badge rojo de mensajes no leídos (`!isOpen && unreadCount > 0`).
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**creado**):
+    - Panel emergente (360x480 px) ubicado en `bottom: 132px; right: 400px;` (a la izquierda de `AiChatPanel` sin solapamiento, permitiendo ambos abiertos a la vez).
+    - Cabecera con título "Chat del equipo", indicador de conexión con viñeta de estado ("En línea", "Reconectando…" o "Conectando…"), slot reservado para el futuro selector de modelo IA (`id="team-chat-model-selector-slot"`), y botón de cierre.
+    - Lista de mensajes con scroll automático inteligente (se desplaza al fondo ante nuevos mensajes salvo si el usuario subió el scroll manualmente).
+    - Formateo de fecha `HH:mm`, diferenciación de autor propio (`.team-chat-msg--own` alineado a la derecha con fondo azul) frente a otros participantes, mensajes de IA (`role === "ai"`) y mensajes de sistema (`role === "system"`).
+    - Caja de entrada con textarea multilínea (Enter envía, Shift+Enter inserta salto de línea), contador `{text.length}/2000`, botón de enviar deshabilitado si está vacío o supera 2000 caracteres, y banner visible de error con botón de descarte.
+  - `frontend/src/teamChat/TeamChat.scss` (**creado**):
+    - Estilos coincidentes con la paleta de la aplicación y variables CSS (`--island-bg`, `--dialog-border-color`, `--color-on-surface`, `--ui-font`).
+    - Posicionamiento absoluto/fijo coordinado y reglas responsivas.
+  - `frontend/src/teamChat/index.ts` (**creado**):
+    - Barrel export para componentes, hook y tipos.
+  - `frontend/excalidraw-app/App.tsx` (**modificado**):
+    - Montaje de `teamChat = useTeamChat({ diagramId: currentDiagramId || getActiveDiagramId() })` dentro de `ExcalidrawWrapper`.
+    - Renderizado de `<TeamChatButton>` y `{teamChat.isOpen && <TeamChatPanel>}` como hermanos de `AiChatButton` y `AiChatPanel`.
+- **Archivos NO Modificados**:
+  - `AiChatPanel.tsx`, `AiChat.scss`, sincronización de elementos del lienzo, `joinDiagramRoom`/`leaveDiagramRoom` y backend permanecieron intactos.
+- **Pruebas Ejecutadas**:
+  - `npm --prefix frontend run test:typecheck`: 0 errores TypeScript en frontend (`tsc` completado exitosamente).
+  - `npm --prefix backend test`: 28/28 tests aprobados en backend (código 0).
+
+
+
+
+
+
+
 
 
 

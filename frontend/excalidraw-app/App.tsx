@@ -45,14 +45,18 @@ import {
   share,
   youtubeIcon,
 } from "@excalidraw/excalidraw/components/icons";
-import { isElementLink, isBoundToContainer } from "@excalidraw/element";
+import {
+  isElementLink,
+  isBoundToContainer,
+  newElementWith,
+  isInitializedImageElement,
+  syncInvalidIndices,
+} from "@excalidraw/element";
 import {
   bumpElementVersions,
   restoreAppState,
   restoreElements,
 } from "@excalidraw/excalidraw/data/restore";
-import { newElementWith } from "@excalidraw/element";
-import { isInitializedImageElement } from "@excalidraw/element";
 import clsx from "clsx";
 import {
   parseLibraryTokensFromUrl,
@@ -149,6 +153,11 @@ import { createUmlRelationElement } from "../src/uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../src/uml/updateUmlRelationElement";
 import { AiChatButton } from "../src/aiEdit/AiChatButton";
 import { AiChatPanel } from "../src/aiEdit/AiChatPanel";
+import {
+  useTeamChat,
+  TeamChatButton,
+  TeamChatPanel,
+} from "../src/teamChat";
 import {
   hasSeenHelpOnboarding,
   markHelpOnboardingSeen,
@@ -536,7 +545,11 @@ const ExcalidrawWrapper = ({
     });
 
     excalidrawAPI.updateScene({
-      elements: [...excalidrawAPI.getSceneElements(), container, text],
+      elements: syncInvalidIndices([
+        ...excalidrawAPI.getSceneElements(),
+        container,
+        text,
+      ]),
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     });
 
@@ -745,6 +758,9 @@ const ExcalidrawWrapper = ({
   const [currentDiagramId, setCurrentDiagramId] = useState<string | null>(() =>
     getActiveDiagramId(),
   );
+  const teamChat = useTeamChat({
+    diagramId: currentDiagramId || getActiveDiagramId(),
+  });
   const [isGeneratingBackend, setIsGeneratingBackend] = useState(false);
   const [isGeneratingMobile, setIsGeneratingMobile] = useState(false);
   const [isExportingXmi, setIsExportingXmi] = useState(false);
@@ -2840,6 +2856,26 @@ const ExcalidrawWrapper = ({
             setIsUmlRelationModalOpen(false);
             setEditingUmlRelationElement(null);
           }}
+        />
+      )}
+
+      <TeamChatButton
+        isOpen={teamChat.isOpen}
+        onClick={teamChat.toggleOpen}
+        unreadCount={teamChat.unreadCount}
+      />
+
+      {teamChat.isOpen && (
+        <TeamChatPanel
+          messages={teamChat.messages}
+          isConnected={teamChat.isConnected}
+          isJoined={teamChat.isJoined}
+          error={teamChat.error}
+          isSending={teamChat.isSending}
+          currentUsername={teamChat.currentUsername}
+          onSendMessage={teamChat.sendMessage}
+          onClose={teamChat.closeChat}
+          onClearError={teamChat.clearError}
         />
       )}
 

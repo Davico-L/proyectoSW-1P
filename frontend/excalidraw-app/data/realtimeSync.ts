@@ -52,11 +52,20 @@ export const leaveDiagramRoom = (): void => {
 };
 
 /**
+ * Al desconectarse el socket, las salas en el servidor se pierden.
+ * Se resetea currentRoomId para permitir que la reconexión re-emita 'join-diagram'.
+ */
+socket.on("disconnect", () => {
+  currentRoomId = null;
+});
+
+/**
  * Re-unión automática a la sala tras conexión o reconexión de Socket.IO
  */
 socket.on("connect", () => {
   const diagramId = getActiveDiagramId();
   if (diagramId) {
+    currentRoomId = null;
     joinDiagramRoom(diagramId);
   }
 });

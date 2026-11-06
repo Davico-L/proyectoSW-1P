@@ -6,6 +6,76 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-065
+- **Nombre**: Diagnóstico y corrección de fallos en reconexión de chat y validación de índices fraccionarios (InvalidFractionalIndexError)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Esperando Validación Manual
+- **Objetivo**: Implementar correcciones mínimas para los dos fallos de la prueba 5: (1) En `realtimeSync.ts`, resetear `currentRoomId = null` en `disconnect` y forzar re-unión en `connect` para que `join-diagram` se emita siempre; (2) En `useTeamChat.ts`, sincronizar `attemptChatJoin()` con la confirmación de sala recibida en `diagram-state`, garantizando que `join-diagram` esté completado antes de intentar `chat-join`; (3) En `App.tsx:handleUmlModalConfirm`, envolver la escena con `syncInvalidIndices` de `@excalidraw/element` para asignar índices fraccionarios válidos y ascendentes a los elementos nuevos antes de `updateScene`, preservando intactas las validaciones de Excalidraw. Verificar con typecheck (0 errores) y suite de backend (28/28 tests aprobados). Pendiente validación manual de regresión por el usuario.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-064
+- **Nombre**: Panel de Chat del Equipo en Frontend con sincronización Socket.IO y persistencia (CU18 Fase 4)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Completada
+- **Objetivo**: Crear el componente "Chat del equipo" (`TeamChatPanel.tsx`, `TeamChatButton.tsx`, `useTeamChat.ts`, `TeamChat.scss`) hermano de `AiChatButton` y `AiChatPanel` en `ExcalidrawWrapper` dentro de `frontend/excalidraw-app/App.tsx`. Ubicar el botón y el panel para que no se solapen con los de la IA personal. Dejar espacio en cabecera para futuro selector de modelo. Mantener el hook/componente montado mientras el diagrama esté abierto para gestionar: (1) `chat-join` con reintento (hasta 5 veces cada 500ms ante `not_in_room`) en conexión, reconexión y cambio de diagrama; (2) carga y fusión de historial con `GET /diagrams/:id/chat?limit=50` sin duplicar; (3) recepción y renderizado de `chat-message` de la sala en tiempo real; (4) envío seguro con validación, mensajes de error en español, redirección ante `invalid_session` con `session-invalid`, scroll inteligente, badge de no leídos, soporte de enter/shift+enter y límite de 2000 caracteres. Sin tocar `AiChatPanel`, sincronización de lienzo, `joinDiagramRoom`/`leaveDiagramRoom` ni backend.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-063
+- **Nombre**: Sanitización pública de mensajes de chat omitiendo authorSessionId (CU18 Ajuste de Seguridad)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Completada
+- **Objetivo**: Crear una función compartida (por ejemplo en `chatRepository.ts`, `toPublicChatMessage`) que convierta un documento de mensaje interno a su forma pública exponiendo únicamente `{ id, diagramId, authorName, role, text, createdAt, mentions?, proposal? }` y excluyendo estrictamente `authorSessionId` (credencial de sesión). Aplicar esta conversión compartida en `socket.ts` (emisión de evento `chat-message`) y en `diagramRoutes.ts` (respuesta de `GET /diagrams/:id/chat`). Conservar `authorSessionId` en la base de datos MongoDB. Agregar/ajustar pruebas unitarias y de integración para asegurar que `authorSessionId` nunca se filtre hacia el cliente.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-062
+- **Nombre**: Endpoint GET /diagrams/:id/chat para historial de mensajes (CU18 Fase 3 Paso 2)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Completada
+- **Objetivo**: Implementar el endpoint `GET /diagrams/:id/chat?limit=50` en el router de diagramas. Exigir y validar el encabezado `x-session-id` contra `getSession` (401 si falta o no existe). Validar el parámetro opcional `limit`: por defecto 50, máx 100, y responder 400 si no es un número entero positivo. Verificar la existencia del diagrama siguiendo el patrón del router. Invocar `listMessages(id, limit)` de `chatRepository.ts` y responder 200 `{ messages: [...] }` en orden cronológico ascendente y formato idéntico al evento `chat-message`. Responder 503 `{ error: "chat_unavailable" }` ante `ChatUnavailableError`. Sin tocar `socket.ts`, frontend ni Postgres salvo lectura de sesión.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-061
+- **Nombre**: Eventos de socket chat-join y chat-message con validación de sesión y persistencia (CU18 Fase 3 Paso 1)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Completada
+- **Objetivo**: En `backend/src/socket.ts`, agregar los eventos `chat-join` y `chat-message` sin modificar los eventos existentes (`join-diagram`, `leave-diagram`, `diagram-update`, `diagram-state`). En `chat-join`: validar payload `{ diagramId, sessionId }` (bad_request si falta/no es string), validar sesión en Postgres con `getSession` (invalid_session si no existe), comprobar que el socket pertenezca a la sala `diagramId` en `socket.rooms` (not_in_room si no está). Si es válido, guardar en `socket.data` `{ diagramId, sessionId, authorName: session.username }` y responder al callback `{ ok: true }`. En `chat-message`: validar pertenencia previa en `socket.data` y `socket.rooms` (not_joined), revalidar sesión con `sessionExists` (invalid_session), extraer autor exclusivamente de `socket.data`, persistir con `saveMessage` en MongoDB con role "user" (errores controlados empty, too_long con ChatValidationError y unavailable con ChatUnavailableError), emitir a toda la sala con `io.to(diagramId).emit("chat-message", doc)` y responder al callback `{ ok: true }`. Sin tocar frontend ni Postgres salvo lectura de sesión.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-060
+- **Nombre**: Repositorio de mensajes de chat en MongoDB y robustecimiento de getMongoDb (CU18 Fase 2)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Completada
+- **Objetivo**: En `backend/src/db/mongo.ts`, asegurar que `getMongoDb` reintente conectar cuando la conexión inicial falló o no existe sin tumbar el proceso ni retener un cliente roto en caché, usando "classdraw" como base de datos por defecto si la URI no la especifica. Crear `backend/src/chat/chatRepository.ts` sobre la colección `chat_messages` con `saveMessage` (recorte de espacios, validación de vacío y máx 2000 caracteres, fecha createdAt, id como string) y `listMessages` (últimos mensajes en orden cronológico ascendente, límite por defecto 50 y máx 100). Creación idempotente del índice `{ diagramId: 1, createdAt: 1 }`. Lanzamiento de error controlado `ChatUnavailableError` ante indisponibilidad de Mongo. Pruebas exhaustivas con el framework de pruebas de backend (`node:test`) cubriendo guardado, listado, orden, límites, validaciones, separación por diagrama, error sin Mongo y limpieza de datos de prueba. Sin tocar `socket.ts`, rutas ni frontend.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-059
+- **Nombre**: Conexión no bloqueante a MongoDB Atlas para chat de equipo (CU18 Fase 1)
+- **Fecha de Inicio**: 2026-11-05
+- **Estado**: Completada
+- **Objetivo**: Instalar el paquete oficial `mongodb` en el backend. Crear el módulo `backend/src/db/mongo.ts` con cliente singleton reutilizable leyendo `MONGODB_URI`, exponiendo funciones para obtener la base de datos (`getMongoDb`), comprobar la conexión con ping (`checkMongoConnection` o `connectMongo`) y cierre ordenado (`closeMongoConnection`). Agregar `MONGODB_URI=` a `backend/.env.example`. En `backend/src/index.ts`, iniciar la comprobación/conexión a MongoDB de manera no bloqueante (sin afectar Postgres, Socket.IO ni el lienzo si falta la variable o Atlas no responde) y cerrar la conexión al apagar el servidor. No tocar `socket.ts` ni el frontend.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-058
 - **Nombre**: Endpoints GET /ai/providers y PUT /ai/providers/active para listar y cambiar proveedor activo (CU24 Fase 4 Paso 2)
 - **Fecha de Inicio**: 2026-11-04

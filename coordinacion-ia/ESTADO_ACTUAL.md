@@ -57,6 +57,9 @@ Este documento clasifica el estado de avance de las funcionalidades, subsistemas
   - Hook de gestión de mensajes `useAiChat.ts`.
   - Reconocimiento de voz mediante Web Speech API del navegador en `useSpeechRecognition.ts`.
   - Aplicador transaccional de operaciones sobre el lienzo de Excalidraw (`applyAiOperations.ts`) con actualización de enlaces y flechas.
+- **Panel de Chat del Equipo en Tiempo Real (CU18 - Fases 1, 2, 3 y 4 completadas)**:
+  - Backend: Conexión no bloqueante a MongoDB Atlas (`src/db/mongo.ts`), repositorio `chatRepository.ts` (`saveMessage`, `listMessages`, índice compuesto `{ diagramId: 1, createdAt: 1 }` y función `toPublicChatMessage`), eventos Socket.IO `chat-join` y `chat-message` en `src/socket.ts` con validación de sesión y sala, y endpoint HTTP `GET /diagrams/:id/chat?limit=50` en `diagramRoutes.ts`.
+  - Frontend: Panel interactivo `TeamChatPanel.tsx` y botón flotante `TeamChatButton.tsx` en `src/teamChat/` con SCSS dedicado (`TeamChat.scss`), ubicados junto a los controles de IA personal sin solapamientos. Hook singleton `useTeamChat.ts` con reintentos automáticos (5 reintentos cada 500ms ante `not_in_room`), deduplicación por id, carga de historial al conectar/reconectar/cambiar de diagrama, soporte de Enter / Shift+Enter, contador de caracteres (máx 2000), badge de mensajes no leídos, scroll inteligente y slot libre en cabecera para selector de modelo. Verificado con 28/28 tests en backend y 0 errores de compilación TypeScript en frontend.
 - **Integración con Backend en Canvas**: Botones integrados en la barra de herramientas y menú principal para "Generar Backend", "Generar app móvil", "Exportar a XMI", "Importar desde XMI", "Mis diagramas" y cierre de sesión.
 - **Desactivación de Sincronización LocalStorage Inconsistente**: Cumplimiento del ADR 006 para evitar pérdida de datos al cambiar de pestaña.
 

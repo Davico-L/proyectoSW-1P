@@ -58,6 +58,21 @@ Este documento registra los errores técnicos, bloqueos, problemas de integraci�
 - **Solución / Mitigación**: Se envolvió el contenido del cuerpo en `SingleChildScrollView(padding: const EdgeInsets.all(24.0), child: Column(...))` permitiendo desplazamiento elástico y eliminando desbordes en cualquier tamaño de pantalla.
 - **Estado**: Resuelto
 
+---
+
+### [ERR-006] Fallo de re-unión a salas Socket.IO tras reconexión e InvalidFractionalIndexError en creación de clases UML
+- **Fecha**: 2026-11-05
+- **Componente / Módulo Afectado**: Frontend / `frontend/excalidraw-app/data/realtimeSync.ts`, `frontend/excalidraw-app/App.tsx` y `frontend/src/teamChat/useTeamChat.ts`
+- **Descripción**: Durante la prueba de reconexión tras corte de red: (1) El panel de chat permanecía en «Conectando…» indefinidamente y el lienzo no sincronizaba entre pestañas; (2) Al crear una clase UML desde el modal, la consola arrojaba `InvalidFractionalIndexError` apuntando a `handleUmlModalConfirm -> replaceAllElements -> validateFractionalIndices`.
+- **Causa Raíz**:
+  1. En `realtimeSync.ts`, `currentRoomId` no se reseteaba a `null` ante el evento `"disconnect"`. Al reconectar, `joinDiagramRoom` encontraba `currentRoomId === diagramId` y retornaba anticipadamente sin emitir `join-diagram`. El backend nunca unía al nuevo socket a la sala, por lo que `chat-join` era rechazado con `not_in_room` y `diagram-update` no llegaba a las demás pestañas.
+  2. En `App.tsx:handleUmlModalConfirm`, los elementos generados por `createUmlClassElement` tenían `index: null`. Al agregarse directamente a `updateScene`, `validateIndicesThrottled` ejecutaba `validateFractionalIndices`, arrojando `InvalidFractionalIndexError` por violación de índice fraccionario nulo y orden de texto vinculado.
+- **Solución / Mitigación**:
+  1. En `realtimeSync.ts`, se añadió escucha a `socket.on("disconnect")` reseteando `currentRoomId = null`, y en `socket.on("connect")` se forzó `currentRoomId = null` antes de invocar `joinDiagramRoom(diagramId)`.
+  2. En `useTeamChat.ts`, se suscribió a `onDiagramState` para disparar `attemptChatJoin()` exactamente cuando el backend confirma `join-diagram` (emitiendo `diagram-state`), garantizando pertenencia a la sala antes del intento de chat.
+  3. En `App.tsx:handleUmlModalConfirm`, se envolvieron los elementos con `syncInvalidIndices([...elements, container, text])` de `@excalidraw/element`, asignando claves fraccionarias válidas y ascendentes (`text.index > container.index`) antes de invocar `updateScene`, manteniendo las validaciones de Excalidraw 100% activas.
+- **Estado**: Resuelto
+
 
 
 

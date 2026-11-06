@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { sessionExists } from "../services/sessionService";
+import { sessionExists, getSession } from "../services/sessionService";
 import {
   createDiagram,
   getDiagramById,
@@ -14,6 +14,11 @@ import { editWithFallback, getActiveProviderId } from "../ai/providers";
 import { validateAndResolveOperations } from "../services/operationValidator";
 import { generateXmiDocument } from "../xmiExporter/generateXmi";
 import { handleAiFromImage } from "./aiVisionRoutes";
+import {
+  listMessages,
+  toPublicChatMessage,
+  ChatUnavailableError,
+} from "../chat/chatRepository";
 
 export const diagramRouter = Router();
 
@@ -104,6 +109,75 @@ diagramRouter.get("/:id", async (req: Request, res: Response): Promise<void> => 
   } catch (error: any) {
     console.error("[diagramRoutes] Error en GET /diagrams/:id:", error);
     res.status(500).json({ error: "Error interno al recuperar el diagrama." });
+  }
+});
+
+// GET /diagrams/:id/chat: Obtener historial de mensajes de chat del equipo (CU18)
+diagramRouter.get("/:id/chat", async (req: Request, res: Response): Promise<void> => {
+  try {
+    // 1. Exige x-session-id y lo valida con getSession; sin encabezado o con sesión inexistente responde 401
+    const rawSessionId = req.headers["x-session-id"];
+    const sessionId =
+      typeof rawSessionId === "string"
+        ? rawSessionId.trim()
+        : Array.isArray(rawSessionId)
+        ? rawSessionId[0]?.trim()
+        : "";
+
+    if (!sessionId) {
+      res.status(401).json({ error: "No autenticado" });
+      return;
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      res.status(401).json({ error: "No autenticado" });
+      return;
+    }
+
+    // 2. Validar identificador del diagrama
+    const { id } = req.params;
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "Identificador de diagrama inválido." });
+      return;
+    }
+
+    // 3. Comprobar que el diagrama exista en Postgres (mismo patrón que GET /:id y demás endpoints)
+    const diagram = await getDiagramById(id);
+    if (!diagram) {
+      res.status(404).json({ error: "Diagrama no encontrado." });
+      return;
+    }
+
+    // 4. Parámetro limit opcional: por defecto 50, máximo 100; si no es entero positivo responde 400
+    let limit = 50;
+    if (req.query.limit !== undefined) {
+      const limitStr = String(req.query.limit).trim();
+      if (!/^\d+$/.test(limitStr) || parseInt(limitStr, 10) <= 0) {
+        res.status(400).json({
+          error: "El parámetro 'limit' debe ser un número entero positivo.",
+        });
+        return;
+      }
+      limit = Math.min(100, parseInt(limitStr, 10));
+    }
+
+    // 5. Llamar a listMessages de chatRepository.ts (con await)
+    const messages = await listMessages(id, limit);
+
+    // 6. Convertir cada mensaje a su forma pública sanitizada (sin authorSessionId)
+    const publicMessages = messages.map(toPublicChatMessage);
+
+    // 7. Responder 200 con { messages: [...] } en orden cronológico ascendente
+    res.status(200).json({ messages: publicMessages });
+  } catch (error: any) {
+    if (error instanceof ChatUnavailableError) {
+      res.status(503).json({ error: "chat_unavailable" });
+      return;
+    }
+
+    console.error("[diagramRoutes] Error en GET /diagrams/:id/chat:", error);
+    res.status(500).json({ error: "Error interno al recuperar el historial de chat." });
   }
 });
 
