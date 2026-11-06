@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
 import type { PublicChatMessage } from "./types";
+import { TeamModelSelector } from "./TeamModelSelector";
 import "./TeamChat.scss";
 
 export interface TeamChatPanelProps {
@@ -12,6 +13,7 @@ export interface TeamChatPanelProps {
   onSendMessage: (text: string) => Promise<boolean>;
   onClose: () => void;
   onClearError: () => void;
+  backendUrl?: string;
 }
 
 export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
@@ -24,6 +26,7 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
   onSendMessage,
   onClose,
   onClearError,
+  backendUrl,
 }) => {
   const [inputText, setInputText] = useState<string>("");
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -114,22 +117,47 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
     >
       {/* Cabecera */}
       <div className="team-chat-header">
-        <div className="team-chat-header-title">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="team-chat-header-icon"
+        <div className="team-chat-header-top">
+          <div className="team-chat-header-title">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="team-chat-header-icon"
+            >
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span>Chat del equipo</span>
+          </div>
+
+          <button
+            type="button"
+            className="team-chat-close-btn"
+            onClick={onClose}
+            aria-label="Cerrar chat del equipo"
+            title="Cerrar chat"
           >
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          <span>Chat del equipo</span>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="team-chat-header-sub">
           <span
             className={`team-chat-status ${connectionStatus.statusClass}`}
             title={`Estado: ${connectionStatus.label}`}
@@ -137,34 +165,15 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
             <span className="status-dot" />
             {connectionStatus.label}
           </span>
-        </div>
 
-        {/* Espacio reservado para el futuro selector de modelo de IA */}
-        <div
-          className="team-chat-header-model-slot"
-          id="team-chat-model-selector-slot"
-          aria-hidden="true"
-        />
-
-        <button
-          type="button"
-          className="team-chat-close-btn"
-          onClick={onClose}
-          aria-label="Cerrar chat del equipo"
-          title="Cerrar chat"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          {/* Selector de modelo de IA del equipo */}
+          <div
+            className="team-chat-header-model-slot"
+            id="team-chat-model-selector-slot"
           >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+            <TeamModelSelector backendUrl={backendUrl} />
+          </div>
+        </div>
       </div>
 
       {/* Lista de mensajes */}

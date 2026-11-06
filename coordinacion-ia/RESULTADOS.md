@@ -767,6 +767,43 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix frontend run test:typecheck`: 0 errores TypeScript en frontend (`tsc` completado exitosamente).
   - `npm --prefix backend test`: 28/28 tests aprobados en backend (código 0).
 
+---
+
+### [RES-068] Investigación Técnica de Selección de Proveedores y Fallback (CU24)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-068
+- **Entregables Producidos**:
+  - Informe técnico de discrepancia entre el requisito funcional de CU24 (permitir seleccionar modelos no disponibles) y la respuesta HTTP 409 `PROVIDER_UNAVAILABLE` en `PUT /ai/providers/active`.
+  - Análisis del flujo de ejecución de fallback en `providerManager.ts:editWithFallback` y comprobación de seguridad ante selección de proveedores inactivos.
+  - Propuesta técnica aprobada para la corrección de `aiProviderRoutes.ts` y la circularidad de la cadena `getFallbackChain`.
+
+---
+
+### [RES-069] Corrección de Selección de Proveedores IA y Cadena de Fallback (CU24)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-069
+- **Entregables Producidos**:
+  - `backend/src/routes/aiProviderRoutes.ts` (**modificado**):
+    - En `PUT /ai/providers/active`, se eliminó la comprobación bloqueante `checkProviderHealth(id, true)` que respondía 409 `PROVIDER_UNAVAILABLE`.
+    - Se mantiene estrictamente el middleware de sesión `requireUserSession` (401 ante falta o invalidez de sesión) y la validación de identificador (400 `INVALID_INPUT` si no es `local`, `groq` o `gemini`).
+    - Ahora ejecuta `setActiveProviderId(id)` y responde 200 `{ ok: true, active: id }` incluso si el proveedor no está disponible.
+  - `backend/src/ai/providers/providerManager.ts` (**modificado**):
+    - Corregida la función `getFallbackChain(active)` exportada: ante cualquier proveedor activo, intenta primero el activo y luego los otros dos en el orden base `["local", "groq", "gemini"]` sin duplicados (`[active, ...baseOrder.filter(id => id !== active)]`).
+    - Cobertura completa de casos: `local -> groq -> gemini`, `groq -> local -> gemini`, `gemini -> local -> groq`.
+  - `backend/src/ai/providers/aiProviders.test.ts` (**creado**):
+    - Suite automatizada con 14 tests evaluando: orden de `getFallbackChain` para cada proveedor; rechazos 401 y 400 en `PUT /active`; selección de Local offline (200), Groq (200) y Gemini (200); resolución con fallback ante Local o Gemini no disponibles; error `AI_ALL_PROVIDERS_FAILED` y respuesta HTTP 503 `AI_SERVICE_UNAVAILABLE` en `POST /diagrams/:id/ai-edit`.
+  - `backend/package.json` (**modificado**):
+    - Inclusión de `src/ai/providers/aiProviders.test.ts` en el comando `npm test`.
+- **Archivos NO Modificados**:
+  - `frontend/src/teamChat/TeamModelSelector.tsx`, `AiChatPanel.tsx`, `socket.ts`, autenticación y configuraciones de proveedores permanecieron 100% intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend run build`: 0 errores TypeScript (`tsc` completado exitosamente).
+  - `npm --prefix frontend run test:typecheck`: 0 errores TypeScript (`tsc` completado exitosamente).
+  - `npm --prefix backend test`: 42/42 tests aprobados (9 suites completas, 0 fallos).
+
+
+
+
 
 
 

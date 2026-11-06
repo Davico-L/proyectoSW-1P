@@ -13,7 +13,6 @@ import crypto from "crypto";
 import {
   setLocalConfig,
   listProviders,
-  checkProviderHealth,
   setActiveProviderId,
 } from "../ai/providers";
 import { getSession } from "../services/sessionService";
@@ -81,7 +80,6 @@ aiProviderRouter.get(
  *   200  { ok: true, active: id }
  *   400  { error: "INVALID_INPUT", message: "..." }
  *   401  { error: "No autenticado" }
- *   409  { error: "PROVIDER_UNAVAILABLE", message: "El modelo seleccionado no está disponible" }
  */
 aiProviderRouter.put(
   "/active",
@@ -94,16 +92,6 @@ aiProviderRouter.put(
         res.status(400).json({
           error: "INVALID_INPUT",
           message: "El campo 'id' debe ser 'local', 'groq' o 'gemini'.",
-        });
-        return;
-      }
-
-      // Verifica el proveedor con una comprobación nueva (sin usar el valor guardado)
-      const isHealthy = await checkProviderHealth(id, true);
-      if (!isHealthy) {
-        res.status(409).json({
-          error: "PROVIDER_UNAVAILABLE",
-          message: "El modelo seleccionado no está disponible",
         });
         return;
       }

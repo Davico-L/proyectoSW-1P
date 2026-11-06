@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "test": "tsx --test src/mobileGenerator/converter.test.ts src/chat/chatRepository.test.ts src/chat/socketChatEvents.test.ts src/chat/diagramChatEndpoint.test.ts",
+    "test": "tsx --test src/mobileGenerator/converter.test.ts src/chat/chatRepository.test.ts src/chat/socketChatEvents.test.ts src/chat/diagramChatEndpoint.test.ts src/ai/providers/aiProviders.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],

@@ -8,3 +8,13 @@ export interface PublicChatMessage {
   mentions?: string[];
   proposal?: any;
 }
+
+export type ProviderId = "local" | "groq" | "gemini";
+
+export interface AiProviderInfo {
+  id: ProviderId;
+  label: string;
+  available: boolean;
+  active: boolean;
+  model: string | null;
+}

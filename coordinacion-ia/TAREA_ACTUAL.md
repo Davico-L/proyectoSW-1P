@@ -6,10 +6,50 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-069
+- **Nombre**: Corrección de selección de proveedores IA y cadena de fallback circular (CU24)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Implementar la corrección en backend: (1) En `aiProviderRoutes.ts` permitir que `PUT /ai/providers/active` asigne el proveedor activo y responda 200 `{ ok: true, active: id }` aunque el proveedor no esté disponible, eliminando el rechazo HTTP 409 y manteniendo validación de id (400) y de sesión (401); (2) En `providerManager.ts` corregir `getFallbackChain(active)` para que siempre intente primero el activo y luego los otros dos en el orden base sin duplicados (local -> groq -> gemini; groq -> local -> gemini; gemini -> local -> groq); (3) Crear/actualizar pruebas automatizadas en backend verificando selección sin Colab (200), salto a fallback Groq, selección de Groq y Gemini, fallback desde Gemini no disponible, rechazos 400 y 401, y manejo 503 si todos fallan. Validar con build backend, typecheck frontend y tests de backend.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-068
+- **Nombre**: Investigación técnica de selección de proveedores IA no disponibles y mecanismo de fallback (CU24)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Investigar exhaustivamente en el backend (`aiProviderRoutes.ts`, `providerManager.ts` y flujo de ejecución IA) la discrepancia entre el requisito funcional (permitir seleccionar proveedores no disponibles confiando en el fallback) y el rechazo HTTP 409 `PROVIDER_UNAVAILABLE`. Determinar si es seguro permitir la selección, cómo opera el fallback al invocar la IA, y definir los cambios mínimos recomendados sin modificar código de producción.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-067
+- **Nombre**: Corrección visual de encabezado en Chat del Equipo para evitar superposición (CU24 Fase 5)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Corregir exclusivamente la distribución visual del encabezado en `TeamChatPanel.tsx` y `TeamChat.scss`. Reorganizar la estructura con un diseño flexible/adaptable (flex/grid) para que el título, el indicador de conexión ("En línea", "Reconectando", etc.), el selector de modelo de IA y el botón de cierre cuenten con espacios dedicados sin solaparse ni ocultarse en el ancho del panel (360px) ni en pantallas estrechas. Mantener intacta la lógica, el backend y `AiChatPanel`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-066
+- **Nombre**: Selector de Modelo de IA en Cabecera del Chat del Equipo (CU24 Fase 5)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Implementar en el frontend el selector de modelo de IA dentro del espacio reservado en la cabecera de `TeamChatPanel.tsx` (`#team-chat-model-selector-slot`). Consumir los endpoints existentes `GET /ai/providers` y `PUT /ai/providers/active` (enviando `x-session-id`). Mostrar los tres proveedores (local, groq, gemini) con estado de disponibilidad (punto + texto corto "disponible"/"no disponible") y marcar el activo. Al seleccionar otro, enviar PUT, actualizar el activo y mostrar error discreto en español ante 400 o 409, redirigiendo a login ante 401 (`session-invalid`). Carga inicial al abrir el panel y botón pequeño para forzar refresco (`?refresh=1`) sin polling. Permitir seleccionar proveedores no disponibles respetando el respaldo automático del backend. Texto aclaratorio "Modelo activo del equipo". Sin modificar `AiChatPanel`, `socket.ts` ni backend.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-065
 - **Nombre**: Diagnóstico y corrección de fallos en reconexión de chat y validación de índices fraccionarios (InvalidFractionalIndexError)
 - **Fecha de Inicio**: 2026-11-05
-- **Estado**: Esperando Validación Manual
+- **Estado**: Completada
 - **Objetivo**: Implementar correcciones mínimas para los dos fallos de la prueba 5: (1) En `realtimeSync.ts`, resetear `currentRoomId = null` en `disconnect` y forzar re-unión en `connect` para que `join-diagram` se emita siempre; (2) En `useTeamChat.ts`, sincronizar `attemptChatJoin()` con la confirmación de sala recibida en `diagram-state`, garantizando que `join-diagram` esté completado antes de intentar `chat-join`; (3) En `App.tsx:handleUmlModalConfirm`, envolver la escena con `syncInvalidIndices` de `@excalidraw/element` para asignar índices fraccionarios válidos y ascendentes a los elementos nuevos antes de `updateScene`, preservando intactas las validaciones de Excalidraw. Verificar con typecheck (0 errores) y suite de backend (28/28 tests aprobados). Pendiente validación manual de regresión por el usuario.
 
 ---

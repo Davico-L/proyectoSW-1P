@@ -154,13 +154,12 @@ export async function listProviders(forceRefresh = false): Promise<ProviderInfo[
 // 3. Cadena de respaldo
 // ---------------------------------------------------------------------------
 
-function getFallbackChain(active: ProviderId): ProviderId[] {
+export function getFallbackChain(active: ProviderId): ProviderId[] {
   const baseOrder: ProviderId[] = ["local", "groq", "gemini"];
-  const startIdx = baseOrder.indexOf(active);
-  if (startIdx >= 0) {
-    return baseOrder.slice(startIdx);
+  if (!baseOrder.includes(active)) {
+    return [...baseOrder];
   }
-  return baseOrder;
+  return [active, ...baseOrder.filter((id) => id !== active)];
 }
 
 function isNetworkOrConnectionError(err: any): boolean {
