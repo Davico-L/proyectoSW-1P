@@ -1091,6 +1091,75 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix backend test`: 92/92 pruebas aprobadas (17 suites completas).
   - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados (exit code 0).
 
+---
+
+### [RES-084] Corrección de Truncamiento por Límite en chatReply para Proveedores Gemini, Groq y Local (CU19 Backend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-084
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/types.ts` (**modificado**):
+    - Exporta `SENTENCE_CLOSING_PUNCTUATION = /[.!?\)»"]/`.
+    - Exporta la función utilitaria `checkTruncatedResponse(text: string, isLimitCut: boolean): void`. Si hubo corte por límite (`MAX_TOKENS` o `length`) y el texto tiene menos de 200 caracteres o no contiene signos de cierre de oración, lanza un error controlado `Error("TRUNCATED_RESPONSE")` con propiedad `code: "TRUNCATED_RESPONSE"`. Si tiene >= 200 caracteres y signos de puntuación de cierre, se preserva.
+  - `backend/src/ai/providers/geminiProvider.ts` (**modificado**):
+    - En `chatReply`, añade `thinkingConfig: { thinkingBudget: 0 }` en la configuración de llamada a `generateContent`, manteniendo `maxOutputTokens: 400`.
+    - Detecta si `candidate.finishReason === "MAX_TOKENS"` y ejecuta `checkTruncatedResponse`.
+  - `backend/src/ai/providers/groqProvider.ts` (**modificado**):
+    - En `chatReply`, detecta si `choice.finish_reason === "length"` y ejecuta `checkTruncatedResponse`.
+  - `backend/src/ai/providers/localProvider.ts` (**modificado**):
+    - En `chatReply`, detecta si `choice.finish_reason === "length"` y ejecuta `checkTruncatedResponse`.
+  - `backend/src/ai/providers/providerManager.ts` (**modificado**):
+    - En `chatWithFallback`, detecta explícitamente `err.message === "TRUNCATED_RESPONSE" || err.code === "TRUNCATED_RESPONSE"`.
+    - Evita reintentos inútiles en el mismo proveedor e inmediatamente pasa al siguiente proveedor en la cadena de respaldo circular.
+  - `backend/src/ai/providers/aiProviders.test.ts` (**modificado**):
+    - Añadida suite `CU19 — Manejo de respuestas truncadas en chatReply` con 7 pruebas unitarias:
+      1. `checkTruncatedResponse` no lanza si no hubo corte por límite.
+      2. `checkTruncatedResponse` lanza ante corte por límite con texto corto (<200 chars).
+      3. `checkTruncatedResponse` lanza ante corte por límite con texto >=200 chars sin signos de cierre.
+      4. `checkTruncatedResponse` conserva la respuesta si >=200 chars y tiene signos de cierre.
+      5. `chatWithFallback`: Gemini con MAX_TOKENS y texto corto cae al siguiente proveedor (Groq) sin reintentos inútiles.
+      6. `chatWithFallback`: Gemini con MAX_TOKENS y texto largo con puntuación se conserva.
+      7. `chatWithFallback`: Gemini con respuesta normal se conserva.
+- **Archivos NO Modificados**:
+  - `editDiagramByInstruction`, servicios de edición de UC7/8/9/17 (`gemini.ts`, `groq.ts`), rutas de diagramas, lienzo y frontend se mantuvieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 99/99 pruebas aprobadas (18 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados (exit code 0).
+  - Script desechable en Temp ejecutando `chatReply` real de Gemini 3 veces con `thinkingBudget: 0`:
+    - Ejecución 1: finishReason `STOP`, 685 caracteres (157 tokens visibles, 0 tokens de pensamiento), puntuación válida.
+    - Ejecución 2: finishReason `STOP`, 795 caracteres (162 tokens visibles, 0 tokens de pensamiento), puntuación válida.
+    - Ejecución 3: finishReason `STOP`, 721 caracteres (175 tokens visibles, 0 tokens de pensamiento), puntuación válida.
+
+---
+
+### [RES-085] Contexto Conversacional Estricto, Rotulación y Métricas de Latencia en CU19 (Backend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-085
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - En `TEAM_AI_SYSTEM_PROMPT`, se agregó la directriz explícita: *"La conversación reciente es solo contexto; responde únicamente a la pregunta actual, que es la última línea ("Pregunta de ..."); no repitas ni continúes respuestas anteriores salvo que la pregunta lo pida; si la pregunta nombra conceptos distintos a los de la conversación anterior, responde sobre los conceptos de la pregunta actual."*
+  - `backend/src/chat/aiChatService.test.ts` (**modificado**):
+    - Añadidas aserciones para verificar la directriz de contexto y foco exclusivo en la pregunta actual en el prompt del sistema.
+  - `backend/src/chat/chatContext.ts` (**modificado**):
+    - `buildChatContext`: rotula el bloque como `"Conversación reciente (solo contexto):"`.
+    - Reduce la ventana de mensajes a los últimos 6 (antes 10) y recorta cada mensaje a 250 caracteres (antes 300).
+    - Separa claramente la línea `"Pregunta de {nombre}: {texto}"` con una línea en blanco (`\n\n`) antes.
+  - `backend/src/chat/chatContext.test.ts` (**modificado**):
+    - Actualizadas las pruebas unitarias para validar el límite de 6 mensajes, el truncamiento a 250 caracteres, el nuevo encabezado de bloque y la separación con línea en blanco.
+  - `backend/src/ai/providers/providerManager.ts` (**modificado**):
+    - En `chatWithFallback`, mide la latencia de resolución en milisegundos (`latencyMs`) y recopila los motivos de salto de proveedores no disponibles o con errores (`skipReasons`).
+    - Cada vez que una consulta es resuelta exitosamente, emite exactamente una línea en consola:
+      `[AI-CHAT] proveedor: {id}, respaldo: {true|false}, latencia: {ms}ms[, motivo: {motivos}]`
+      garantizando cero registro de contenido de mensajes y cero nombres de usuario.
+- **Archivos NO Modificados**:
+  - Frontend, lienzo, sincronización, `realtimeSync.ts`, endpoints y servicios de edición de UC7/8/9/17 (`gemini.ts`, `groq.ts`) se mantuvieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 99/99 pruebas aprobadas (18 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados, verificando la emisión de la línea de métricas de `[AI-CHAT]` en tiempo real.
+
+
+
 
 
 

@@ -298,21 +298,25 @@ export async function chatWithFallback(
   userContent: string,
   options?: ChatReplyOptions
 ): Promise<ChatReplyFallbackResult> {
+  const startTime = Date.now();
   const active = activeProviderId;
   const chain = getFallbackChain(active);
 
   let lastError: any = null;
   let anyProviderAttempted = false;
+  const skipReasons: string[] = [];
 
   for (const providerId of chain) {
     const isHealthy = await checkProviderHealth(providerId);
     if (!isHealthy) {
+      skipReasons.push(`${providerId} no disponible`);
       console.log(`[AI-CHAT-FALLBACK] Proveedor '${providerId}' no disponible. Saltando...`);
       continue;
     }
 
     const provider = getProvider(providerId);
     if (!provider) {
+      skipReasons.push(`${providerId} no registrado`);
       continue;
     }
 
@@ -327,6 +331,10 @@ export async function chatWithFallback(
       try {
         console.log(`[AI-CHAT-FALLBACK] Intentando proveedor '${providerId}' (intento ${attempt})...`);
         const text = await provider.chatReply(systemPrompt, userContent, options);
+
+        const latencyMs = Date.now() - startTime;
+        const reasonPart = isFallback && skipReasons.length > 0 ? `, motivo: ${skipReasons.join("; ")}` : "";
+        console.log(`[AI-CHAT] proveedor: ${providerId}, respaldo: ${isFallback}, latencia: ${latencyMs}ms${reasonPart}`);
 
         console.log(
           `[AI-CHAT-FALLBACK] Respuesta de '${providerId}' (fallback: ${isFallback ? "SÍ" : "NO"})`
@@ -348,7 +356,21 @@ export async function chatWithFallback(
 
         // ante AI_TIMEOUT del local NO reintenta y pasa directo al siguiente
         if (providerId === "local" && isTimeout) {
+          skipReasons.push(`${providerId} (AI_TIMEOUT)`);
           console.log(`[AI-CHAT-FALLBACK] AI_TIMEOUT en local. Pasando al siguiente proveedor...`);
+          break;
+        }
+
+        // ante TRUNCATED_RESPONSE NO reintenta inútilmente y pasa al siguiente proveedor
+        const isTruncated =
+          err?.message === "TRUNCATED_RESPONSE" ||
+          err?.code === "TRUNCATED_RESPONSE";
+
+        if (isTruncated) {
+          skipReasons.push(`${providerId} (TRUNCATED_RESPONSE)`);
+          console.log(
+            `[AI-CHAT-FALLBACK] Respuesta truncada en '${providerId}' (TRUNCATED_RESPONSE). Pasando al siguiente proveedor...`
+          );
           break;
         }
 
@@ -360,6 +382,7 @@ export async function chatWithFallback(
           continue;
         }
 
+        skipReasons.push(`${providerId} (${err?.message || "error"})`);
         break;
       }
     }

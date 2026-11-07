@@ -111,8 +111,8 @@ describe("CU19: chatContext", () => {
   });
 
   describe("buildChatContext", () => {
-    test("más de 10 mensajes: toma solo los últimos 10", () => {
-      const recentMessages = Array.from({ length: 14 }, (_, i) => ({
+    test("más de 6 mensajes: toma solo los últimos 6, rotula 'solo contexto' y separa con línea en blanco", () => {
+      const recentMessages = Array.from({ length: 10 }, (_, i) => ({
         authorName: `User${i + 1}`,
         text: `Mensaje número ${i + 1}`,
       }));
@@ -128,18 +128,19 @@ describe("CU19: chatContext", () => {
       assert.doesNotMatch(context, /User1: Mensaje número 1\b/);
       assert.doesNotMatch(context, /User4: Mensaje número 4\b/);
 
-      // Deben aparecer del 5 al 14 (10 mensajes)
+      // Deben aparecer del 5 al 10 (últimos 6 mensajes)
       assert.match(context, /User5: Mensaje número 5/);
-      assert.match(context, /User14: Mensaje número 14/);
+      assert.match(context, /User10: Mensaje número 10/);
 
-      // Verificación de estructura y última línea
+      // Verificación de estructura y rotulación
       assert.match(context, /^Diagrama actual: Cliente\(id: Integer\)/);
-      assert.match(context, /Conversación reciente:\n/);
-      assert.match(context, /Pregunta de Davico: ¿Cómo funciona el modelo\?$/);
+      assert.match(context, /Conversación reciente \(solo contexto\):\n/);
+      // Claramente separada al final con una línea en blanco antes
+      assert.match(context, /\n\nPregunta de Davico: ¿Cómo funciona el modelo\?$/);
     });
 
-    test("mensaje de más de 300 caracteres: se recorta a 300 caracteres", () => {
-      const longText = "A".repeat(350);
+    test("mensaje de más de 250 caracteres: se recorta a 250 caracteres", () => {
+      const longText = "A".repeat(300);
       const recentMessages = [
         {
           authorName: "Ana",
@@ -154,9 +155,10 @@ describe("CU19: chatContext", () => {
         question: "¿Qué opinas?",
       });
 
-      const expectedTruncated = "A".repeat(300);
+      const expectedTruncated = "A".repeat(250);
       assert.match(context, new RegExp(`Ana: ${expectedTruncated}`));
       assert.doesNotMatch(context, new RegExp(`Ana: ${expectedTruncated}A`));
+      assert.match(context, /\n\nPregunta de Luis: ¿Qué opinas\?$/);
     });
 
     test("lista de mensajes vacía: omite el bloque de Conversación reciente", () => {
@@ -169,7 +171,7 @@ describe("CU19: chatContext", () => {
 
       assert.doesNotMatch(context, /Conversación reciente/);
       assert.match(context, /^Diagrama actual: El diagrama está vacío\./);
-      assert.match(context, /Pregunta de Davico: ¿Qué diagramas tenemos\?$/);
+      assert.match(context, /\n\nPregunta de Davico: ¿Qué diagramas tenemos\?$/);
     });
   });
 });

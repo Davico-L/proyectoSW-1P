@@ -1,4 +1,9 @@
-import { ModelProvider, ProviderId, ChatReplyOptions } from "./types";
+import {
+  ModelProvider,
+  ProviderId,
+  ChatReplyOptions,
+  checkTruncatedResponse,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Configuración en memoria del servidor local (Colab u otro endpoint OpenAI-
@@ -399,11 +404,16 @@ export class LocalProvider implements ModelProvider {
     console.log("[Local] chatReply respondió correctamente");
 
     const data: any = await response.json();
-    const text: string = (data?.choices?.[0]?.message?.content ?? "").trim();
+    const choice = data?.choices?.[0];
+    const finishReason = choice?.finish_reason;
+    const text: string = (choice?.message?.content ?? "").trim();
 
     if (!text) {
       throw new Error("INVALID_AI_RESPONSE");
     }
+
+    const isLimitCut = finishReason === "length";
+    checkTruncatedResponse(text, isLimitCut);
 
     return text;
   }

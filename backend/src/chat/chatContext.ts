@@ -142,16 +142,16 @@ export function buildChatContext({
   // Bloque: Conversación reciente (omitido si no hay mensajes)
   const validMessages = Array.isArray(recentMessages) ? recentMessages : [];
   if (validMessages.length > 0) {
-    const last10 = validMessages.slice(-10);
-    const lines = last10.map((msg) => {
+    const last6 = validMessages.slice(-6);
+    const lines = last6.map((msg) => {
       const author = (msg.authorName || "Usuario").trim();
       const rawText = msg.text || "";
       const truncated =
-        rawText.length > 300 ? rawText.slice(0, 300) : rawText;
+        rawText.length > 250 ? rawText.slice(0, 250) : rawText;
       return `${author}: ${truncated}`;
     });
 
-    blocks.push(`Conversación reciente:\n${lines.join("\n")}`);
+    blocks.push(`Conversación reciente (solo contexto):\n${lines.join("\n")}`);
   }
 
   // Última línea: Pregunta de {askerName}: {question}

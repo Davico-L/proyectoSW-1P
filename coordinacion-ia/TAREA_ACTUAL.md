@@ -6,6 +6,26 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-085
+- **Nombre**: Contexto conversacional estricto, rotulación y métricas de latencia de fallback en CU19 (Backend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/`: (1) En `TEAM_AI_SYSTEM_PROMPT` (`aiChatService.ts`), agregar directriz explícita de que la conversación reciente es solo contexto, responder únicamente a la pregunta actual (última línea "Pregunta de ..."), no repetir ni continuar respuestas previas salvo petición explícita, y responder sobre los conceptos de la pregunta actual si difieren; (2) En `buildChatContext` (`chatContext.ts`), rotular como "Conversación reciente (solo contexto):", limitar a los últimos 6 mensajes recortados a 250 caracteres cada uno, y separar la pregunta final con una línea en blanco antes; (3) En `providerManager.ts` (`chatWithFallback`), emitir un log de una línea con proveedor que atendió, fallback (true/false), latencia en ms y motivo del salto si hubo, sin registrar contenido ni nombres de usuario; (4) Actualizar pruebas en `chatContext.test.ts` y validar con `npm test` (99/99), `typecheck` (0 errores) y `testTeamChatAi.ts` (7/7).
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-084
+- **Nombre**: Corrección de truncamiento por límite en chatReply para proveedores Gemini, Groq y Local (CU19 Backend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/src/ai/providers/`: (1) En `geminiProvider.ts`, agregar `thinkingConfig: { thinkingBudget: 0 }` en `chatReply` manteniendo `maxOutputTokens: 400` (sin tocar `editDiagramByInstruction` ni UC7/8/9/17); (2) Implementar política común ante corte por límite (`finishReason: MAX_TOKENS` en Gemini, `finish_reason: "length"` en Groq y Local): si el texto tiene menos de 200 caracteres o no contiene signos de cierre de oración (`. ! ? ) » "`), lanzar error controlado `TRUNCATED_RESPONSE`; si es más largo y tiene cierre, devolverlo normalmente; (3) Verificar en `providerManager.ts` que `chatWithFallback` trate `TRUNCATED_RESPONSE` como fallo sin reintentos inútiles y continúe la cadena hasta `AiUnavailableError` si todos fallan; (4) Pruebas unitarias de corte y fallback en `aiProviders.test.ts`; (5) Probar script desechable en Temp con Gemini real 3 veces comprobando finishReason (STOP en las 3) y longitud (~700 chars); validar con `npm test` (99/99) y `typecheck` (0 errores).
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-083
 - **Nombre**: Refinamiento de directrices en TEAM_AI_SYSTEM_PROMPT para Codia (CU19 Backend)
 - **Fecha de Inicio**: 2026-11-07

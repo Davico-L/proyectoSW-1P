@@ -72,6 +72,8 @@ describe("CU19: aiChatService", () => {
     assert.match(TEAM_AI_SYSTEM_PROMPT, /En preguntas conceptuales, explica con un ejemplo simple y genérico/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /Nunca inventes clases, atributos ni relaciones/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /Si no estás segura de algo, dilo en vez de inventar/i);
+    assert.match(TEAM_AI_SYSTEM_PROMPT, /La conversación reciente es solo contexto/i);
+    assert.match(TEAM_AI_SYSTEM_PROMPT, /responde únicamente a la pregunta actual/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /habla de la asociación y su multiplicidad; no propongas claves foráneas/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /atributo derivado se escribe con una barra inclinada/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /composición se dibuja con rombo relleno/i);

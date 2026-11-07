@@ -1,5 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
-import { ModelProvider, ProviderId, ChatReplyOptions } from "./types";
+import {
+  ModelProvider,
+  ProviderId,
+  ChatReplyOptions,
+  checkTruncatedResponse,
+} from "./types";
 import { editDiagramByInstruction } from "../../services/gemini";
 
 const GEMINI_CHAT_MODEL = "gemini-3.6-flash";
@@ -41,15 +46,23 @@ export class GeminiProvider implements ModelProvider {
       config: {
         systemInstruction: systemPrompt,
         maxOutputTokens: maxTokens,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
         httpOptions: { timeout: 20000 },
       },
     });
 
+    const candidate = response?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
     const text = (response?.text ?? "").trim();
 
     if (!text) {
       throw new Error("INVALID_AI_RESPONSE");
     }
+
+    const isLimitCut = finishReason === "MAX_TOKENS";
+    checkTruncatedResponse(text, isLimitCut);
 
     return text;
   }

@@ -10,9 +10,10 @@ import {
   setActiveProviderId,
   clearHealthCache,
   editWithFallback,
+  chatWithFallback,
 } from "./providerManager";
 import { getProvider, registerProvider } from "./index";
-import { ModelProvider } from "./types";
+import { ModelProvider, checkTruncatedResponse } from "./types";
 
 describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => {
   let server: http.Server;
@@ -399,6 +400,152 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
       const json = await res.json();
       assert.equal(json.error, "AI_SERVICE_UNAVAILABLE");
       assert.equal(json.message, "La IA no está disponible por ahora");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 7. CU19 — chatReply y corte por límite (TRUNCATED_RESPONSE)
+  // -------------------------------------------------------------------------
+  describe("CU19 — Manejo de respuestas truncadas en chatReply", () => {
+    test("checkTruncatedResponse: no lanza si isLimitCut es falso", () => {
+      assert.doesNotThrow(() => {
+        checkTruncatedResponse("Texto corto", false);
+      });
+    });
+
+    test("checkTruncatedResponse: lanza TRUNCATED_RESPONSE si isLimitCut es true y texto < 200 caracteres", () => {
+      assert.throws(
+        () => {
+          checkTruncatedResponse("David Luna, la diferencia principal entre una asociación", true);
+        },
+        (err: any) => err.message === "TRUNCATED_RESPONSE" && err.code === "TRUNCATED_RESPONSE"
+      );
+    });
+
+    test("checkTruncatedResponse: lanza TRUNCATED_RESPONSE si isLimitCut es true, texto >= 200 pero sin signos de cierre", () => {
+      const longTextWithoutEnding = "palabra ".repeat(35); // > 200 chars sin punto ni signo
+      assert.ok(longTextWithoutEnding.length >= 200);
+      assert.throws(
+        () => {
+          checkTruncatedResponse(longTextWithoutEnding, true);
+        },
+        (err: any) => err.message === "TRUNCATED_RESPONSE"
+      );
+    });
+
+    test("checkTruncatedResponse: conserva la respuesta si isLimitCut es true, texto >= 200 y tiene signo de cierre", () => {
+      const longTextWithEnding = "Esta es una explicación extensa sobre las asociaciones en UML. " + "palabra ".repeat(30);
+      assert.ok(longTextWithEnding.length >= 200);
+      assert.doesNotThrow(() => {
+        checkTruncatedResponse(longTextWithEnding, true);
+      });
+    });
+
+    test("chatWithFallback: Gemini con MAX_TOKENS y texto corto (< 200 chars) cae al siguiente proveedor (Groq)", async () => {
+      setActiveProviderId("gemini");
+      clearHealthCache();
+
+      let geminiCalls = 0;
+      let groqCalls = 0;
+
+      registerProvider({
+        id: "gemini",
+        label: "Gemini",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({ operations: [] }),
+        chatReply: async () => {
+          geminiCalls++;
+          checkTruncatedResponse("David Luna, la diferencia principal entre una asociación", true);
+          return "";
+        },
+      });
+
+      registerProvider({
+        id: "groq",
+        label: "Groq",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({ operations: [] }),
+        chatReply: async () => {
+          groqCalls++;
+          return "David Luna, la asociación es una relación estructural y la composición implica dependencia de vida.";
+        },
+      });
+
+      registerProvider({
+        id: "local",
+        label: "Local",
+        isConfigured: () => false,
+        editDiagramByInstruction: async () => ({ operations: [] }),
+        chatReply: async () => { throw new Error("Local offline"); },
+      });
+
+      const result = await chatWithFallback("sys", "¿diferencia entre asociación y composición?");
+
+      // Debe intentar Gemini 1 sola vez (sin reintentos inútiles ante TRUNCATED_RESPONSE) y pasar a Groq
+      assert.equal(geminiCalls, 1);
+      assert.equal(groqCalls, 1);
+      assert.equal(result.provider, "groq");
+      assert.equal(result.fallback, true);
+      assert.match(result.text, /la asociación es una relación estructural/);
+    });
+
+    test("chatWithFallback: Gemini con MAX_TOKENS y texto largo (>= 200 chars con punto) se conserva", async () => {
+      setActiveProviderId("gemini");
+      clearHealthCache();
+
+      let geminiCalls = 0;
+      const longResponseWithPunctuation =
+        "David Luna, la asociación en UML representa una relación general entre clases independientes. " +
+        "Por otro lado, la composición define que las partes no pueden existir sin el todo. " +
+        "Por ejemplo, una factura y sus líneas de detalle representan una composición típica en cualquier modelo";
+
+      assert.ok(longResponseWithPunctuation.length >= 200);
+
+      registerProvider({
+        id: "gemini",
+        label: "Gemini",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({ operations: [] }),
+        chatReply: async () => {
+          geminiCalls++;
+          checkTruncatedResponse(longResponseWithPunctuation, true);
+          return longResponseWithPunctuation;
+        },
+      });
+
+      const result = await chatWithFallback("sys", "¿diferencia entre asociación y composición?");
+
+      assert.equal(geminiCalls, 1);
+      assert.equal(result.provider, "gemini");
+      assert.equal(result.fallback, false);
+      assert.equal(result.text, longResponseWithPunctuation);
+    });
+
+    test("chatWithFallback: Gemini con respuesta normal (no MAX_TOKENS) se conserva normalmente", async () => {
+      setActiveProviderId("gemini");
+      clearHealthCache();
+
+      let geminiCalls = 0;
+      const normalResponse = "David Luna, ¿en qué puedo ayudarte?";
+
+      registerProvider({
+        id: "gemini",
+        label: "Gemini",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({ operations: [] }),
+        chatReply: async () => {
+          geminiCalls++;
+          checkTruncatedResponse(normalResponse, false);
+          return normalResponse;
+        },
+      });
+
+      const result = await chatWithFallback("sys", "@codia");
+
+      assert.equal(geminiCalls, 1);
+      assert.equal(result.provider, "gemini");
+      assert.equal(result.fallback, false);
+      assert.equal(result.text, normalResponse);
     });
   });
 });

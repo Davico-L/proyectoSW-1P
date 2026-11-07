@@ -1,4 +1,9 @@
-import { ModelProvider, ProviderId, ChatReplyOptions } from "./types";
+import {
+  ModelProvider,
+  ProviderId,
+  ChatReplyOptions,
+  checkTruncatedResponse,
+} from "./types";
 import { editDiagramByInstructionGroq } from "../../services/groq";
 
 const GROQ_CHAT_API_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -70,11 +75,16 @@ export class GroqProvider implements ModelProvider {
     }
 
     const data: any = await response.json();
-    const text: string = (data?.choices?.[0]?.message?.content ?? "").trim();
+    const choice = data?.choices?.[0];
+    const finishReason = choice?.finish_reason;
+    const text: string = (choice?.message?.content ?? "").trim();
 
     if (!text) {
       throw new Error("INVALID_AI_RESPONSE");
     }
+
+    const isLimitCut = finishReason === "length";
+    checkTruncatedResponse(text, isLimitCut);
 
     return text;
   }
