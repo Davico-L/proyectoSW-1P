@@ -31,6 +31,9 @@ export interface ChatMessageInput {
   proposal?: any;
   replyTo?: string;
   addressedTo?: string;
+  kind?: string;
+  operations?: any[];
+  warnings?: string[];
 }
 
 export interface ChatMessageDocument {
@@ -45,6 +48,9 @@ export interface ChatMessageDocument {
   replyTo?: string;
   addressedTo?: string;
   createdAt: Date;
+  kind?: string;
+  operations?: any[];
+  warnings?: string[];
 }
 
 export interface PublicChatMessage {
@@ -58,11 +64,13 @@ export interface PublicChatMessage {
   proposal?: any;
   replyTo?: string;
   addressedTo?: string;
+  kind?: string;
 }
 
 /**
  * Convierte un documento de mensaje interno a su representación pública para los clientes.
  * OMITE estrictamente authorSessionId (credencial sensible del usuario).
+ * kind sí viaja en la difusión pública; operations y warnings NO se envían a los clientes.
  */
 export const toPublicChatMessage = (
   doc: ChatMessageDocument | (ChatMessageDocument & { [key: string]: any })
@@ -92,6 +100,10 @@ export const toPublicChatMessage = (
     publicMsg.addressedTo = doc.addressedTo.trim();
   }
 
+  if (typeof doc.kind === "string" && doc.kind.trim() !== "") {
+    publicMsg.kind = doc.kind.trim();
+  }
+
   return publicMsg;
 };
 
@@ -107,6 +119,9 @@ export interface MongoChatMessageDoc {
   replyTo?: string;
   addressedTo?: string;
   createdAt: Date;
+  kind?: string;
+  operations?: any[];
+  warnings?: string[];
 }
 
 // Control de inicialización idempotente del índice por diagrama y fecha
@@ -221,6 +236,14 @@ export const saveMessage = async (
         ? input.addressedTo.trim()
         : undefined;
 
+    const kind =
+      typeof input?.kind === "string" && input.kind.trim() !== ""
+        ? input.kind.trim()
+        : undefined;
+
+    const operations = Array.isArray(input?.operations) ? input.operations : undefined;
+    const warnings = Array.isArray(input?.warnings) ? input.warnings : undefined;
+
     const docToInsert: Omit<MongoChatMessageDoc, "_id"> = {
       diagramId,
       authorSessionId,
@@ -231,6 +254,9 @@ export const saveMessage = async (
       ...(input.proposal !== undefined ? { proposal: input.proposal } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(addressedTo ? { addressedTo } : {}),
+      ...(kind ? { kind } : {}),
+      ...(operations !== undefined ? { operations } : {}),
+      ...(warnings !== undefined ? { warnings } : {}),
       createdAt: now,
     };
 
@@ -247,6 +273,9 @@ export const saveMessage = async (
       ...(input.proposal !== undefined ? { proposal: input.proposal } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(addressedTo ? { addressedTo } : {}),
+      ...(kind ? { kind } : {}),
+      ...(operations !== undefined ? { operations } : {}),
+      ...(warnings !== undefined ? { warnings } : {}),
       createdAt: now,
     };
   } catch (err: any) {
@@ -311,6 +340,9 @@ export const listMessages = async (
       ...(doc.proposal !== undefined ? { proposal: doc.proposal } : {}),
       ...(typeof doc.replyTo === "string" && doc.replyTo ? { replyTo: doc.replyTo } : {}),
       ...(typeof doc.addressedTo === "string" && doc.addressedTo ? { addressedTo: doc.addressedTo } : {}),
+      ...(typeof doc.kind === "string" && doc.kind ? { kind: doc.kind } : {}),
+      ...(Array.isArray(doc.operations) ? { operations: doc.operations } : {}),
+      ...(Array.isArray(doc.warnings) ? { warnings: doc.warnings } : {}),
       createdAt: doc.createdAt,
     }));
   } catch (err: any) {

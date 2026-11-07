@@ -4,17 +4,30 @@ import {
   ACTIVE_SESSION_KEY,
   ACTIVE_USERNAME_KEY,
   BACKEND_URL,
+  saveDiagramToBackend,
 } from "../../excalidraw-app/data/backendSync";
+import { LocalData } from "../../excalidraw-app/data/LocalData";
+import { applyAiOperations } from "../aiEdit/applyAiOperations";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { PublicChatMessage } from "./types";
+import {
+  BoundedSet,
+  validateAiOperations,
+  calculateOperationCounts,
+  hasCodiaMention,
+  saveDiagramWithTimeout,
+} from "./aiOperationsHandler";
 
 export interface UseTeamChatOptions {
   diagramId: string | null;
   backendUrl?: string;
+  excalidrawAPI?: ExcalidrawImperativeAPI | null;
 }
 
 export const useTeamChat = ({
   diagramId,
   backendUrl = BACKEND_URL,
+  excalidrawAPI,
 }: UseTeamChatOptions) => {
   const [messages, setMessages] = useState<PublicChatMessage[]>([]);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -23,6 +36,15 @@ export const useTeamChat = ({
   const [isJoined, setIsJoined] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState<boolean>(false);
+
+  const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(
+    excalidrawAPI || null,
+  );
+  excalidrawAPIRef.current = excalidrawAPI || null;
+
+  const processedMessageIdsRef = useRef<BoundedSet<string>>(
+    new BoundedSet<string>(100),
+  );
 
   const isOpenRef = useRef<boolean>(isOpen);
   isOpenRef.current = isOpen;
@@ -261,6 +283,98 @@ export const useTeamChat = ({
     };
   }, []);
 
+  // Escuchar el evento 'ai-operations' para aplicar modificaciones de Codia al lienzo (CU20)
+  useEffect(() => {
+    const handleAiOperations = async (
+      payload: any,
+      ackCallback?: (ack: { applied: number; failed: number }) => void,
+    ) => {
+      let ackCalled = false;
+      const safeAck = (res: { applied: number; failed: number }) => {
+        if (!ackCalled) {
+          ackCalled = true;
+          if (typeof ackCallback === "function") {
+            try {
+              ackCallback(res);
+            } catch (ackErr) {
+              console.warn(
+                "[TeamChat] Error al invocar callback de ack para ai-operations:",
+                ackErr,
+              );
+            }
+          }
+        }
+      };
+
+      try {
+        const messageId =
+          typeof payload?.messageId === "string" ? payload.messageId : "";
+        const isProcessed = messageId
+          ? processedMessageIdsRef.current.has(messageId)
+          : false;
+        const api = excalidrawAPIRef.current;
+
+        const validation = validateAiOperations({
+          payload,
+          activeDiagramId: currentDiagramIdRef.current,
+          hasExcalidrawApi: Boolean(api),
+          isAlreadyProcessed: isProcessed,
+        });
+
+        if (!validation.canApply) {
+          safeAck(validation.ack || { applied: 0, failed: 0 });
+          return;
+        }
+
+        // Marcar messageId como procesado para deduplicar
+        if (messageId) {
+          processedMessageIdsRef.current.add(messageId);
+        }
+
+        const operations = payload.operations;
+        const opResult = applyAiOperations(operations, api!);
+        const { applied, failed } = calculateOperationCounts(
+          opResult?.results || [],
+          operations.length,
+        );
+
+        // Cancelar guardado diferido y persistir inmediatamente al backend
+        LocalData.cancelSave();
+
+        const timeoutMs =
+          typeof payload?.timeoutMs === "number" && payload.timeoutMs > 0
+            ? payload.timeoutMs
+            : 15000;
+        const saveTimeout = Math.max(1000, timeoutMs - 3000);
+
+        await saveDiagramWithTimeout(async () => {
+          await saveDiagramToBackend(
+            api!.getSceneElementsIncludingDeleted(),
+            api!.getAppState(),
+            api!.getFiles(),
+          );
+        }, saveTimeout);
+
+        safeAck({ applied, failed });
+      } catch (err) {
+        console.error(
+          "[TeamChat] Error no controlado en listener de ai-operations:",
+          err,
+        );
+        const count = Array.isArray(payload?.operations)
+          ? payload.operations.length
+          : 0;
+        safeAck({ applied: 0, failed: count });
+      }
+    };
+
+    socket.on("ai-operations", handleAiOperations);
+
+    return () => {
+      socket.off("ai-operations", handleAiOperations);
+    };
+  }, []);
+
   /**
    * Envía un mensaje de chat al equipo mediante el evento de socket 'chat-message'.
    * Retorna true si fue exitoso (para que el formulario vacíe el texto).
@@ -282,6 +396,26 @@ export const useTeamChat = ({
       if (trimmedText.length > 2000) {
         setError("El mensaje no puede superar los 2000 caracteres.");
         return false;
+      }
+
+      // D8: Si el mensaje menciona a Codia / IA, cancelar guardado diferido y esperar guardado inmediato
+      if (hasCodiaMention(trimmedText)) {
+        const api = excalidrawAPIRef.current;
+        if (api) {
+          LocalData.cancelSave();
+          try {
+            await saveDiagramToBackend(
+              api.getSceneElementsIncludingDeleted(),
+              api.getAppState(),
+              api.getFiles(),
+            );
+          } catch (saveErr) {
+            console.warn(
+              "[TeamChat] Error al guardar diagrama antes de enviar mensaje a Codia:",
+              saveErr,
+            );
+          }
+        }
       }
 
       setIsSending(true);

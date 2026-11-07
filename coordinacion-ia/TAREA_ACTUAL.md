@@ -6,6 +6,67 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-090
+- **Nombre**: Corrección de CU20: Detección preventiva de pedidos no soportados por UC7 (eliminación y renombrado de atributos/métodos)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `modificationHelpers.ts`, implementar función pura `detectUnsupportedAttributeRequest(texto)` que normaliza el texto y retorna `"delete"`, `"rename"` o `null`. Identifica verbos de borrado o renombrado a corta distancia (máximo 2 palabras de relleno) de palabras clave de atributos/métodos (`atributo`, `metodo`, `campo`, `propiedad`, `funcion`), excluyendo explícitamente borrado de clases/relaciones ("elimina la clase Pedido y sus atributos", "elimina la relación..."), renombrado de clases y cambios de tipo ("cambia el tipo del atributo edad a Integer").
+  (2) En `diagramAiEditService.ts`, antes de llamar a `editWithFallback`, verificar si la instrucción solicita una operación no soportada. Si es así, devolver de inmediato `status: "onlyWarnings"` con un aviso en primera persona y lenguaje natural indicando la limitación y sugiriendo editar la clase en el lienzo, sin invocar proveedores de IA.
+  (3) Agregar suite de pruebas exhaustiva (al menos 20 casos de detección positiva y negativa, y prueba de no invocación a `editWithFallback`).
+  (4) Validar con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-089
+- **Nombre**: Fase 3 de CU20: Enganche de ai-operations y sincronización previa en el frontend
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `frontend/`:
+  (1) Inspeccionar ciclo de vida de `useTeamChat.ts`, obtención de socket (`realtimeSync.ts`), punto de montaje en `App.tsx` / `TeamChatPanel.tsx`, envío de mensajes, guardado previo con `LocalData.cancelSave` / `saveDiagramToBackend`, e integración con `applyAiOperations`.
+  (2) Implementar el listener de `ai-operations` en `useTeamChat.ts` (activo permanentemente aunque el panel esté cerrado), procesando operaciones con `applyAiOperations(operations, excalidrawAPI)`, deduplicando `messageId` con un Set con tope, calculando applied y failed, forzando guardado previo/posterior hacia el backend, y respondiendo el acknowledgement antes del timeout.
+  (3) Guardado previo en envío de mensajes cuando hay mención a Codia/ia antes de emitir `chat-message`.
+  (4) Asegurar soporte de `kind?: string` en mensajes sin romper visuales.
+  (5) Validar con typecheck, build y pruebas correspondientes.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-088
+- **Nombre**: Fase 2B de CU20: Enganche del servicio de modificación al chat del equipo (Backend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `aiChatService.ts`: extender `AnswerInRoomParams` con `onOperations?: (operations: any[], warnings: string[]) => Promise<{ applied: number; failed: number } | null>`. Si no se pasa, mantener comportamiento idéntico a CU19. Si se pasa, dentro de `executeTask` (manteniendo el turno en la cola), clasificar intención con `classifyIntent`. Si es `"modification"`, invocar `requestDiagramEdit`. Manejar estados `"ready"` (invocando `onOperations`, formateando resumen con `summarizeOperations`, avisos y conteo de fallos si hubo), `"onlyWarnings"` (avisos en español natural), `"noChanges"` (fallback a `chatReply`), `"tooMany"` (mensaje para dividir) y `"diagramNotFound"`. Añadir `kind: "modification" | "answer"` y `warnings` al resultado.
+  (2) En `socket.ts`: en el manejador de `chat-message`, definir el callback `onOperations` utilizando `socket.timeout(timeoutMs).emitWithAck("ai-operations", { messageId, diagramId, operations, warnings, timeoutMs })` con timeout por defecto de 15s configurable por `CODIA_ACK_TIMEOUT_MS`. Validar `{ applied, failed }` y pasar `onOperations` a `answerInRoom`. Guardar la respuesta con `kind`, `operations` y `warnings` en Mongo y emitir a la sala con `toPublicChatMessage`.
+  (3) En `chatRepository.ts`: agregar campos opcionales `kind`, `operations` y `warnings` a `ChatMessageInput`, `ChatMessageDocument` y `MongoChatMessageDoc`. Incluir `kind` en `toPublicChatMessage` y omitir `operations` y `warnings` en mensajes públicos.
+  (4) Pruebas automatizadas en `backend/src/chat/aiChatServiceCu20.test.ts` con `node:test` cubriendo los 11 escenarios requeridos.
+  (5) Script de prueba manual en `backend/scripts/cu20-socket-smoke.ts` con Socket.IO cliente simulando los 3 escenarios (A: ack exitoso, B: timeout, C: desconexión).
+  (6) Actualizar `package.json` test script e integrar suites de prueba sin romper CU19.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-087
+- **Nombre**: Fase 1 de CU20: Funciones puras de clasificación de intención, resumen de operaciones y control de tope (Backend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/src/chat/`:
+  (1) Crear el archivo nuevo `modificationHelpers.ts` sin tocar archivos preexistentes, implementando tres funciones puras:
+      - `classifyIntent(text)`: normaliza (@Codia/@ia, ¿/¡, espacios, minúsculas, tildes, "por favor" inicial) y clasifica en "query" o "modification" siguiendo orden estricto de reglas (interrogativas/explicación primero -> cortesía/verbos de modificación -> query por defecto).
+      - `summarizeOperations(operations, warnings)`: genera un resumen legible con plantilla en español (ej: "creé la clase Cliente con 2 atributos", "actualicé la clase Producto", "eliminé la relación entre X e Y"), combinando múltiples operaciones y anexando avisos de descartes al final, comenzando en minúscula.
+      - `checkOperationLimit(operations, max)`: valida si el número de operaciones supera `MAX_OPERATIONS = 10` y genera mensaje descriptivo solicitando dividir en cambios más pequeños.
+  (2) Crear `modificationHelpers.test.ts` con `node:test` cubriendo al menos 25 casos de `classifyIntent` con frases del equipo, casos de `summarizeOperations` (individuales, múltiples, con avisos) y validación de límites (10 vs 11).
+  (3) Ejecutar `npm test` y `typecheck` en backend.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-086
 - **Nombre**: Supresión de preámbulo de saludo/presentación y calibración de tokens por proveedor en CU19 (Backend)
 - **Fecha de Inicio**: 2026-11-07

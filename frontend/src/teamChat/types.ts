@@ -11,6 +11,7 @@ export interface PublicChatMessage {
   replyTo?: string;
   addressedTo?: string;
   proposal?: any;
+  kind?: string;
 }
 
 export type ProviderId = "local" | "groq" | "gemini";

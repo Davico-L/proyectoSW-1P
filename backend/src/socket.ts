@@ -22,6 +22,20 @@ import {
 import { chatWithFallback } from "./ai/providers/providerManager";
 import { extractUmlModel } from "./backendGenerator/extractModel";
 
+export const CODIA_ACK_TIMEOUT_MS = parseInt(
+  process.env.CODIA_ACK_TIMEOUT_MS || "15000",
+  10
+);
+
+export function getCodiaAckTimeoutMs(): number {
+  const envVal = process.env.CODIA_ACK_TIMEOUT_MS;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 15000;
+}
+
 const defaultAiChatService = createAiChatService({
   getDiagramModel: async (diagId: string) => {
     const diagram = await getDiagramById(diagId);
@@ -297,15 +311,53 @@ export const initSocket = (
                     askerName: asker,
                   });
 
-                  // b) llamar a answerInRoom
+                  // b) definir callback onOperations usando el socket del autor y llamar a answerInRoom
+                  const onOperations = async (
+                    operations: any[],
+                    warnings: string[]
+                  ): Promise<{ applied: number; failed: number } | null> => {
+                    if (!socket.connected) {
+                      return null;
+                    }
+                    const timeoutMs = getCodiaAckTimeoutMs();
+                    try {
+                      const ack = await socket.timeout(timeoutMs).emitWithAck("ai-operations", {
+                        messageId: triggerMessageId,
+                        diagramId: targetDiagramId,
+                        operations,
+                        warnings,
+                        timeoutMs,
+                      });
+
+                      if (
+                        ack &&
+                        typeof ack === "object" &&
+                        typeof (ack as any).applied === "number" &&
+                        typeof (ack as any).failed === "number" &&
+                        (ack as any).applied >= 0 &&
+                        (ack as any).failed >= 0
+                      ) {
+                        return {
+                          applied: (ack as any).applied,
+                          failed: (ack as any).failed,
+                        };
+                      }
+                      return null;
+                    } catch (_err) {
+                      // Timeout, desconexión o fallo en el acknowledgement del cliente
+                      return null;
+                    }
+                  };
+
                   const result = await aiChatService.answerInRoom({
                     diagramId: targetDiagramId,
                     askerName: asker,
                     askerMessageId: triggerMessageId,
                     question: mention.question,
+                    onOperations,
                   });
 
-                  // c) guardar la respuesta con saveMessage con role "ai", authorName AI_DISPLAY_NAME, replyTo y addressedTo, y emitirla como "chat-message"
+                  // c) guardar la respuesta con saveMessage con role "ai", authorName AI_DISPLAY_NAME, replyTo, addressedTo, kind, operations y warnings, y emitirla como "chat-message"
                   const aiDoc = await saveMessage({
                     diagramId: targetDiagramId,
                     authorSessionId: "ai",
@@ -314,6 +366,9 @@ export const initSocket = (
                     text: result.message,
                     replyTo: triggerMessageId,
                     addressedTo: asker,
+                    kind: result.kind,
+                    operations: result.operations,
+                    warnings: result.warnings,
                   });
 
                   io.to(targetDiagramId).emit(

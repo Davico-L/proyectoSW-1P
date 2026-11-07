@@ -760,6 +760,7 @@ const ExcalidrawWrapper = ({
   );
   const teamChat = useTeamChat({
     diagramId: currentDiagramId || getActiveDiagramId(),
+    excalidrawAPI,
   });
   const [isGeneratingBackend, setIsGeneratingBackend] = useState(false);
   const [isGeneratingMobile, setIsGeneratingMobile] = useState(false);
@@ -2877,6 +2878,7 @@ const ExcalidrawWrapper = ({
           onClose={teamChat.closeChat}
           onClearError={teamChat.clearError}
           diagramId={teamChat.diagramId}
+          excalidrawAPI={excalidrawAPI}
         />
       )}
 

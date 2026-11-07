@@ -5,6 +5,8 @@ import {
   trimToLastSentence,
   stripGreetingPreamble,
 } from "./aiChatHelpers";
+import { classifyIntent, summarizeOperations } from "./modificationHelpers";
+import { requestDiagramEdit } from "./diagramAiEditService";
 
 export class AiBusyError extends Error {
   constructor(
@@ -65,6 +67,8 @@ export interface AiChatServiceDeps {
     userContent: string,
     options?: { maxTokens?: number }
   ) => Promise<string>;
+  requestDiagramEdit?: typeof requestDiagramEdit;
+  classifyIntent?: typeof classifyIntent;
 }
 
 export interface AnswerInRoomParams {
@@ -72,11 +76,17 @@ export interface AnswerInRoomParams {
   askerName: string;
   askerMessageId: string;
   question: string;
+  onOperations?: (
+    operations: any[],
+    warnings: string[]
+  ) => Promise<{ applied: number; failed: number } | null>;
 }
 
 export interface AnswerInRoomResult {
   message: string;
-  operations: [];
+  operations: any[];
+  kind?: "answer" | "modification";
+  warnings?: string[];
 }
 
 export function createAiChatService(deps: AiChatServiceDeps) {
@@ -111,6 +121,7 @@ export function createAiChatService(deps: AiChatServiceDeps) {
       return {
         message: `${cleanAsker}, ¿en qué puedo ayudarte?`,
         operations: [],
+        kind: "answer",
       };
     }
 
@@ -124,6 +135,102 @@ export function createAiChatService(deps: AiChatServiceDeps) {
     return new Promise<AnswerInRoomResult>((resolve, reject) => {
       const executeTask = async () => {
         try {
+          const classify = deps.classifyIntent ?? classifyIntent;
+          const editDiagram = deps.requestDiagramEdit ?? requestDiagramEdit;
+
+          const hasOnOperations = typeof params.onOperations === "function";
+          const intent = hasOnOperations ? classify(rawQuestion) : "query";
+
+          if (intent === "modification") {
+            const editResult = await editDiagram({
+              diagramId: params.diagramId,
+              instruction: rawQuestion,
+            });
+
+            if (editResult.status === "diagramNotFound") {
+              const msg = ensureAddressedByName(
+                "no encontré el diagrama especificado.",
+                cleanAsker
+              );
+              resolve({
+                message: msg,
+                operations: [],
+                kind: "answer",
+              });
+              return;
+            }
+
+            if (editResult.status === "tooMany") {
+              const baseMsg =
+                editResult.message ||
+                "el pedido contiene demasiadas operaciones. Por favor, dividilo en cambios más pequeños.";
+              const msg = ensureAddressedByName(baseMsg, cleanAsker);
+              resolve({
+                message: msg,
+                operations: [],
+                kind: "answer",
+              });
+              return;
+            }
+
+            if (editResult.status === "onlyWarnings") {
+              const warningsList = editResult.warnings || [];
+              const joined = warningsList.join("; ").trim().replace(/\.+$/, "");
+              const baseMsg = `no se aplicaron cambios: ${joined || "se descartaron las operaciones"}.`;
+              const msg = ensureAddressedByName(baseMsg, cleanAsker);
+              resolve({
+                message: msg,
+                operations: [],
+                warnings: warningsList,
+                kind: "answer",
+              });
+              return;
+            }
+
+            if (editResult.status === "ready") {
+              const validOps = editResult.validOperations || [];
+              const warningsList = editResult.warnings || [];
+
+              const ack = await params.onOperations!(validOps, warningsList);
+
+              if (!ack || ack.applied <= 0) {
+                const msg = ensureAddressedByName(
+                  "no pude aplicar los cambios al diagrama. Por favor, repite tu pedido.",
+                  cleanAsker
+                );
+                resolve({
+                  message: msg,
+                  operations: [],
+                  warnings: warningsList,
+                  kind: "answer",
+                });
+                return;
+              }
+
+              // ack.applied > 0
+              let summary = summarizeOperations(validOps, warningsList);
+              if (ack.failed > 0) {
+                const failedText =
+                  ack.failed === 1
+                    ? "1 cambio no se pudo aplicar"
+                    : `${ack.failed} cambios no se pudieron aplicar`;
+                summary = `${summary.replace(/\.$/, "")} (${failedText}).`;
+              }
+
+              const finalMsg = ensureAddressedByName(summary, cleanAsker);
+              resolve({
+                message: finalMsg,
+                operations: validOps,
+                warnings: warningsList,
+                kind: "modification",
+              });
+              return;
+            }
+
+            // Si status === "noChanges", continúa abajo al camino de consulta con chatReply
+          }
+
+          // Camino de consulta (CU19):
           // Obtener modelo y formatearlo
           const umlModel = await deps.getDiagramModel(params.diagramId);
           const modelCompact = formatModelCompact(umlModel);
@@ -185,6 +292,7 @@ export function createAiChatService(deps: AiChatServiceDeps) {
           resolve({
             message: processed,
             operations: [],
+            kind: "answer",
           });
         } catch (err) {
           reject(err);

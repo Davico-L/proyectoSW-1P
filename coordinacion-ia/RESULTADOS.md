@@ -1196,6 +1196,112 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix backend test`: 115/115 pruebas unitarias aprobadas (19 suites completas).
   - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados con simulación (cero consumo de cuota de Gemini).
 
+---
+
+### [RES-087] Implementación de Funciones Puras para Fase 1 de CU20 (Backend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-087
+- **Entregables Producidos**:
+  - `backend/src/chat/modificationHelpers.ts` (**nuevo**):
+    - `classifyIntent(text)`: normaliza (@Codia/@ia, ¿/¡, tildes, minúsculas, espacios, "por favor" inicial) y clasifica en "query" o "modification" siguiendo la jerarquía estricta de reglas.
+    - `spanishConjunction(word)`: función auxiliar para resolver conjunciones copulativas "y" / "e" en español (ej. "entre X e Y").
+    - `summarizeOperations(operations, warnings)`: plantilla pura para resúmenes legibles en minúscula inicial combinando múltiples operaciones y anexando avisos de descartes.
+    - `checkOperationLimit(operations, max)` y `MAX_OPERATIONS = 10`: control de tope máximo de operaciones por solicitud.
+  - `backend/src/chat/modificationHelpers.test.ts` (**nuevo**):
+    - Suite completa con 46 pruebas en `node:test` cubriendo normalización, los 6 casos expresamente requeridos por el usuario, fórmulas de cortesía, verbos de modificación, preguntas con verbos de acción, resúmenes individuales/múltiples/con avisos y límites de 10 vs 11 operaciones.
+- **Archivos Preexistentes NO Modificados**:
+  - Cero modificaciones en `diagramRoutes.ts`, `aiChatService.ts`, `socket.ts`, `operationValidator.ts` ni ningún otro archivo de código preexistente.
+- **Verificación Realizada**:
+  - `npx --prefix backend tsx --test backend/src/chat/modificationHelpers.test.ts`: 46/46 pruebas unitarias aprobadas (5 suites completas, 0 fallos).
+  - `npm --prefix backend test`: 115/115 pruebas unitarias del backend aprobadas (19 suites completas).
+  - `npm --prefix backend run typecheck`: 0 errores de TypeScript (`tsc --noEmit`).
+- **Notas y Observaciones**:
+
+### [RES-088] Enganche del Servicio de Modificación al Chat del Equipo (CU20 Fase 2B)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-088
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatService.ts` (modificado):
+    - Parámetro opcional `onOperations` en `AnswerInRoomParams`.
+    - Clasificación con `classifyIntent` y bifurcación a `requestDiagramEdit` dentro de `executeTask` (mantiene el turno de cola FIFO durante todo el ciclo de edición y confirmación).
+    - Manejo de estados: `ready` (invoca `onOperations`, formatea con `summarizeOperations`, añade advertencias y conteo de fallidos si hubo), `onlyWarnings` (avisos en español natural), `noChanges` (cae a `chatReply`), `tooMany` (mensaje de división), `diagramNotFound`.
+    - Retorno con `kind: "modification" | "answer"` y `operations` (vacío salvo que kind sea "modification").
+  - `backend/src/socket.ts` (modificado):
+    - Export de constante `CODIA_ACK_TIMEOUT_MS` (15s por defecto) y función `getCodiaAckTimeoutMs()`.
+    - En el manejador `chat-message`, definición de callback `onOperations` con `socket.timeout(timeoutMs).emitWithAck("ai-operations", ...)`.
+    - Verificación defensiva del acknowledgement `{ applied, failed }` y captura de timeout/desconexión retornando `null`.
+    - Persistencia en Mongo con `saveMessage` incluyendo `kind`, `operations` y `warnings`, y difusión mediante `chat-message` con `toPublicChatMessage`.
+  - `backend/src/chat/chatRepository.ts` (modificado):
+    - Campos opcionales `kind`, `operations` y `warnings` en `ChatMessageInput`, `ChatMessageDocument` y `MongoChatMessageDoc`.
+    - `toPublicChatMessage` propaga `kind` al cliente pero omite estrictamente `operations` y `warnings` internos.
+  - `backend/src/chat/aiChatServiceCu20.test.ts` (nuevo):
+    - 11 pruebas unitarias cubriendo consulta sin cambios (CU19), modificación aplicada (kind "modification"), fallo/timeout de ack (kind "answer"), fallos parciales, `noChanges`, `onlyWarnings`, `tooMany`, `diagramNotFound`, bloqueo de turno en cola FIFO y funcionamiento idéntico a CU19 sin `onOperations`.
+  - `backend/scripts/cu20-socket-smoke.ts` (nuevo):
+    - Script de Socket.IO para simulación de escenarios manuales A (ack exitoso), B (timeout del cliente) y C (desconexión inmediata).
+  - `backend/package.json` (modificado):
+    - Script `test` actualizado integrando las 3 suites de CU20 (`modificationHelpers.test.ts`, `diagramAiEditService.test.ts`, `aiChatServiceCu20.test.ts`).
+- **Archivos Preexistentes NO Modificados**:
+  - `diagramRoutes.ts`, ruta `ai-edit`, `operationValidator.ts`, lienzo, paneles personales y casos CU7/8/9/17 intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend test`: 181/181 pruebas en verde (26 suites completas, 0 fallos).
+  - `npm --prefix backend run typecheck`: 0 errores de TypeScript (`tsc --noEmit`).
+  - Pruebas de CU19 100% intactas y en verde.
+
+### [RES-089] Fase 3 de CU20: Enganche de ai-operations y Sincronización Previa en Frontend
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-089
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/aiOperationsHandler.ts` (**nuevo**):
+    - `BoundedSet<T>`: estructura FIFO acotada a 100 elementos para deduplicar `messageId`.
+    - `validateAiOperations`: función pura que valida precondiciones y genera ack adecuado (`already_processed`, `diagram_mismatch`, `no_api`, `invalid_operations`, `canApply`).
+    - `calculateOperationCounts`: función pura que totaliza `applied` (resultados != `skipped`) y `failed`.
+    - `hasCodiaMention`: función pura que detecta mención a `@Codia` / `@ia` (case-insensitive) como palabra completa o con puntuación circundante.
+    - `saveDiagramWithTimeout`: función que corre el guardado contra un límite de tiempo para no sobrepasar el timeout del servidor.
+  - `frontend/src/teamChat/aiOperationsHandler.test.ts` (**nuevo**):
+    - 20 pruebas unitarias con Vitest cubriendo BoundedSet, validación de precondiciones, conteo de operaciones, detección de menciones y guardado con timeout.
+  - `frontend/src/teamChat/useTeamChat.ts` (**modificado**):
+    - Recibe `excalidrawAPI` en `UseTeamChatOptions` y mantiene referencia activa en `excalidrawAPIRef`.
+    - Listener del evento `ai-operations` en `socket`, permanente a nivel del hook (activo aunque el panel esté cerrado), con limpieza al desmontar y ack garantizado exactamente una vez bajo try/catch y tope `Math.max(1000, timeoutMs - 3000)`.
+    - Invocación de `applyAiOperations(operations, excalidrawAPI)`, cancelación de guardado diferido (`LocalData.cancelSave()`) y guardado forzado a backend (`saveDiagramToBackend`).
+    - En `sendMessage`, detección de mención a Codia/IA e inicio de guardado previo con `LocalData.cancelSave()` y `saveDiagramToBackend` dentro de try/catch.
+  - `frontend/excalidraw-app/App.tsx` (**modificado**):
+    - Pasa `excalidrawAPI` a `useTeamChat` (dentro de `ExcalidrawWrapper`) y opcionalmente a `TeamChatPanel`.
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**modificado**):
+    - Añadido `excalidrawAPI?: any;` en `TeamChatPanelProps`.
+  - `frontend/src/teamChat/types.ts` (**modificado**):
+    - Añadido `kind?: string;` opcional a `PublicChatMessage`.
+- **Archivos Preexistentes NO Modificados**:
+  - `applyAiOperations.ts`, `useAiChat.ts`, `AiChatPanel`, `LocalData.ts`, `backendSync.ts`, `realtimeSync.ts`, lienzo, UC7/8/9/17 intactos.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend vitest run src/teamChat`: 49/49 pruebas en verde (3 suites: `aiOperationsHandler.test.ts`, `mentionHelper.test.ts`, `aiTextFormatter.test.ts`).
+
+### [RES-090] Corrección de CU20: Detección preventiva de pedidos no soportados por UC7 (eliminación y renombrado de atributos/métodos)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-090
+- **Entregables Producidos**:
+  - `backend/src/chat/modificationHelpers.ts` (**modificado**):
+    - Implementada función pura `detectUnsupportedAttributeRequest(texto: string): "delete" | "rename" | null`.
+    - Normalización idéntica a `classifyIntent` (remueve menciones `@Codia`/`@ia`, acentos, signos de puntuación inicial/final, espacios redundantes, minúsculas).
+    - Verbos de borrado: `elimina`, `eliminar`, `eliminale`, `borra`, `borrar`, `borrale`, `quita`, `quitar`, `quitale`, `remueve`, `remover`, `remuevele`, `saca`, `sacar`, `sacale`, `suprime`, `suprimir`, `suprimele`.
+    - Verbos/patrones de renombrado: `renombra`, `renombrar`, `renombrale`, o secuencias de cambio de nombre (`cambia/cambiar/cambiale el nombre`).
+    - Sustantivos objetivo: `atributo`, `atributos`, `metodo`, `metodos`, `campo`, `campos`, `propiedad`, `propiedades`, `funcion`, `funciones`.
+    - Detección basada en proximidad: hasta 2 palabras de relleno (`el`, `la`, `los`, `las`, `un`, `una`, `todos`, `todas`, `sus`, `del`, `de`, `al`, `a`).
+    - Exclusiones estrictas: borrado de clases/relaciones ("elimina la clase Pedido y sus atributos", "elimina la relacion..."), renombrado de clases ("renombra la clase Cliente a Usuario") y modificación de tipo ("cambia el tipo del atributo edad a Integer").
+  - `backend/src/chat/modificationHelpers.test.ts` (**modificado**):
+    - 32 casos de prueba dedicados a `detectUnsupportedAttributeRequest` cubriendo borrado, renombrado, fórmulas de cortesía, plurales, exclusiones de clases/relaciones y cambio de tipos. Total suite: 77 pruebas.
+  - `backend/src/chat/diagramAiEditService.ts` (**modificado**):
+    - Inyectado `detectUnsupportedAttributeRequest` en `DiagramAiEditDeps` (con valor por defecto).
+    - Intercepción temprana antes de `editWithFallback`: si se detecta `"delete"` o `"rename"`, retorna de inmediato `status: "onlyWarnings"` con aviso personalizado en primera persona referenciando la interfaz real (`"Editar Clase UML"`), consumiendo 0 tokens de IA.
+  - `backend/src/chat/diagramAiEditService.test.ts` (**modificado**):
+    - 2 pruebas agregadas (test 7 y test 8) validando que para solicitudes de eliminar o renombrar atributos no se invoca `editWithFallback` y se retorna `status: "onlyWarnings"` con el mensaje correcto. Total suite: 8 pruebas.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores en TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 215/215 pruebas en verde (11 suites de prueba del backend).
+- **Notas y Observaciones**:
+  - No se modificó ningún archivo prohibido (`applyAiOperations.ts`, `operationValidator.ts`, `diagramRoutes.ts`, ruta `ai-edit`, lienzo, UC7/8/9/17).
+
+
+
 
 
 

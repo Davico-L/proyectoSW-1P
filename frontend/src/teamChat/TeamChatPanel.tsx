@@ -22,6 +22,7 @@ export interface TeamChatPanelProps {
   onClearError: () => void;
   backendUrl?: string;
   diagramId?: string | null;
+  excalidrawAPI?: any;
 }
 
 export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
