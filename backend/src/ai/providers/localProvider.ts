@@ -1,4 +1,4 @@
-import { ModelProvider, ProviderId } from "./types";
+import { ModelProvider, ProviderId, ChatReplyOptions } from "./types";
 
 // ---------------------------------------------------------------------------
 // Configuración en memoria del servidor local (Colab u otro endpoint OpenAI-
@@ -348,6 +348,64 @@ export class LocalProvider implements ModelProvider {
     removeNullFields(parsed.operations);
 
     return { operations: parsed.operations };
+  }
+
+  async chatReply(
+    systemPrompt: string,
+    userContent: string,
+    options?: ChatReplyOptions
+  ): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error("El proveedor local no está configurado. Llamá a setLocalConfig primero.");
+    }
+
+    const config = _localConfig!;
+    const timeoutMs = parseInt(process.env.LOCAL_AI_TIMEOUT_MS || "", 10) || 45000;
+    const maxTokens = options?.maxTokens ?? 400;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(`${config.url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userContent },
+          ],
+          max_tokens: maxTokens,
+        }),
+        signal: controller.signal,
+      });
+    } catch (fetchError: any) {
+      if (controller.signal.aborted) {
+        throw new Error("AI_TIMEOUT");
+      }
+      throw fetchError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      let errorBody = "";
+      try { errorBody = await response.text(); } catch { /* ignorar */ }
+      throw new Error(`Local AI error HTTP ${response.status}: ${errorBody || response.statusText}`);
+    }
+
+    console.log("[Local] chatReply respondió correctamente");
+
+    const data: any = await response.json();
+    const text: string = (data?.choices?.[0]?.message?.content ?? "").trim();
+
+    if (!text) {
+      throw new Error("INVALID_AI_RESPONSE");
+    }
+
+    return text;
   }
 }
 

@@ -1,6 +1,13 @@
-import React, { useRef, useEffect, useState, useMemo } from "react";
-import type { PublicChatMessage } from "./types";
+import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import { AI_DISPLAY_NAME, type PublicChatMessage } from "./types";
+import {
+  formatMessageSegments,
+  getMentionSuggestionMatch,
+} from "./mentionHelper";
+import { renderAiFormattedText } from "./aiTextFormatter";
 import { TeamModelSelector } from "./TeamModelSelector";
+import { socket } from "../../excalidraw-app/data/realtimeSync";
+import { getActiveDiagramId } from "../../excalidraw-app/data/backendSync";
 import "./TeamChat.scss";
 
 export interface TeamChatPanelProps {
@@ -14,6 +21,7 @@ export interface TeamChatPanelProps {
   onClose: () => void;
   onClearError: () => void;
   backendUrl?: string;
+  diagramId?: string | null;
 }
 
 export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
@@ -27,11 +35,164 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
   onClose,
   onClearError,
   backendUrl,
+  diagramId,
 }) => {
   const [inputText, setInputText] = useState<string>("");
+  const [cursorPosition, setCursorPosition] = useState<number>(0);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef<boolean>(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const activeDiagramId =
+    diagramId !== undefined ? diagramId : getActiveDiagramId();
+
+  // Contador de consultas pendientes por askerName
+  const [thinkingCounts, setThinkingCounts] = useState<Record<string, number>>({});
+  const timeoutsRef = useRef<Map<string, NodeJS.Timeout[]>>(new Map());
+
+  // Limpiar todos los temporizadores y contadores de pensamiento
+  const clearAllThinking = useCallback(() => {
+    timeoutsRef.current.forEach((timers) => {
+      timers.forEach((t) => clearTimeout(t));
+    });
+    timeoutsRef.current.clear();
+    setThinkingCounts({});
+  }, []);
+
+  // Reiniciar contadores al cambiar de diagrama
+  useEffect(() => {
+    clearAllThinking();
+  }, [activeDiagramId, clearAllThinking]);
+
+  // Reiniciar contadores al reconectar el socket
+  useEffect(() => {
+    const handleConnect = () => {
+      clearAllThinking();
+    };
+    socket.on("connect", handleConnect);
+    return () => {
+      socket.off("connect", handleConnect);
+    };
+  }, [clearAllThinking]);
+
+  // Escuchar el evento 'ai-status' con limpieza al desmontar
+  useEffect(() => {
+    const handleAiStatus = (data: {
+      diagramId?: string;
+      state?: "thinking" | "idle";
+      askerName?: string;
+    }) => {
+      if (!data || !data.diagramId) {
+        return;
+      }
+      // Ignorar eventos de otro diagrama
+      if (activeDiagramId && data.diagramId !== activeDiagramId) {
+        return;
+      }
+
+      const asker = data.askerName?.trim() || "Alguien";
+
+      if (data.state === "thinking") {
+        // Temporizador de seguridad de 180 s para limpiar si nunca llega el "idle"
+        const timeoutId = setTimeout(() => {
+          setThinkingCounts((prev) => {
+            const current = prev[asker] || 0;
+            if (current <= 1) {
+              const next = { ...prev };
+              delete next[asker];
+              return next;
+            }
+            return { ...prev, [asker]: current - 1 };
+          });
+
+          const list = timeoutsRef.current.get(asker);
+          if (list) {
+            const idx = list.indexOf(timeoutId);
+            if (idx !== -1) {
+              list.splice(idx, 1);
+            }
+          }
+        }, 180000);
+
+        const existing = timeoutsRef.current.get(asker) || [];
+        timeoutsRef.current.set(asker, [...existing, timeoutId]);
+
+        setThinkingCounts((prev) => ({
+          ...prev,
+          [asker]: (prev[asker] || 0) + 1,
+        }));
+      } else if (data.state === "idle") {
+        const list = timeoutsRef.current.get(asker);
+        if (list && list.length > 0) {
+          const t = list.shift();
+          if (t) {
+            clearTimeout(t);
+          }
+        }
+
+        setThinkingCounts((prev) => {
+          const current = prev[asker] || 0;
+          if (current <= 1) {
+            const next = { ...prev };
+            delete next[asker];
+            return next;
+          }
+          return { ...prev, [asker]: current - 1 };
+        });
+      }
+    };
+
+    socket.on("ai-status", handleAiStatus);
+    return () => {
+      socket.off("ai-status", handleAiStatus);
+      clearAllThinking();
+    };
+  }, [activeDiagramId, clearAllThinking]);
+
+  // Lista de personas que están esperando respuesta de la IA
+  const waitingAskers = useMemo(() => {
+    return Object.entries(thinkingCounts)
+      .filter(([_, count]) => count > 0)
+      .map(([name]) => name);
+  }, [thinkingCounts]);
+
+  const isAiThinking = waitingAskers.length > 0;
+
+  // Detección de sugerencia de mención @Codia en la palabra actual
+  const suggestionMatch = useMemo(() => {
+    return getMentionSuggestionMatch(inputText, cursorPosition);
+  }, [inputText, cursorPosition]);
+
+  const handleApplySuggestion = () => {
+    if (!suggestionMatch) {
+      return;
+    }
+    const before = inputText.slice(0, suggestionMatch.startIndex);
+    const after = inputText.slice(suggestionMatch.endIndex);
+    const rest = after.startsWith(" ") ? after.slice(1) : after;
+    const replacement = `@${AI_DISPLAY_NAME} `;
+    const newText = `${before}${replacement}${rest}`;
+    const newCursorPos = before.length + replacement.length;
+
+    setInputText(newText);
+    setCursorPosition(newCursorPos);
+
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+        }
+      });
+    }
+  };
+
+  const updateCursorPosition = (
+    e: React.SyntheticEvent<HTMLTextAreaElement>
+  ) => {
+    const target = e.currentTarget;
+    setCursorPosition(target.selectionStart ?? target.value.length);
+  };
 
   // Determinar texto y clase del indicador de conexión
   const connectionStatus = useMemo(() => {
@@ -64,7 +225,7 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
     if (isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isAiThinking]);
 
   // Enfoque inicial al abrir el panel
   useEffect(() => {
@@ -83,6 +244,7 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
     // Solo vaciar el cuadro de texto si la respuesta fue exitosa
     if (success) {
       setInputText("");
+      setCursorPosition(0);
     }
   };
 
@@ -201,17 +363,19 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
           </div>
         ) : (
           messages.map((msg) => {
-            const isOwn =
-              Boolean(currentUsername) &&
-              msg.authorName?.toLowerCase() === currentUsername.toLowerCase();
             const isAi = msg.role === "ai";
             const isSystem = msg.role === "system";
+            const isOwn =
+              !isAi &&
+              !isSystem &&
+              Boolean(currentUsername) &&
+              msg.authorName?.toLowerCase() === currentUsername.toLowerCase();
 
             let msgModifier = "team-chat-msg--other";
-            if (isOwn) {
-              msgModifier = "team-chat-msg--own";
-            } else if (isAi) {
+            if (isAi) {
               msgModifier = "team-chat-msg--ai";
+            } else if (isOwn) {
+              msgModifier = "team-chat-msg--own";
             } else if (isSystem) {
               msgModifier = "team-chat-msg--system";
             }
@@ -222,17 +386,73 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
                 className={`team-chat-msg ${msgModifier}`}
               >
                 <div className="team-chat-msg-header">
-                  <span className="team-chat-msg-author">
-                    {isOwn ? "Tú" : msg.authorName || "Anónimo"}
-                  </span>
+                  <div className="team-chat-msg-author-group">
+                    <span className="team-chat-msg-author">
+                      {isOwn
+                        ? "Tú"
+                        : isAi
+                        ? msg.authorName || AI_DISPLAY_NAME
+                        : msg.authorName || "Anónimo"}
+                    </span>
+                    {isAi && (
+                      <span className="team-chat-msg-badge-ai">IA</span>
+                    )}
+                    {isAi && msg.addressedTo && (
+                      <span className="team-chat-msg-addressed">
+                        para {msg.addressedTo}
+                      </span>
+                    )}
+                  </div>
                   <span className="team-chat-msg-time">
                     {formatTime(msg.createdAt)}
                   </span>
                 </div>
-                <div className="team-chat-msg-body">{msg.text}</div>
+                <div className="team-chat-msg-body">
+                  {isAi ? (
+                    renderAiFormattedText(msg.text)
+                  ) : (
+                    formatMessageSegments(msg.text).map((segment, idx) =>
+                      segment.isMention ? (
+                        <strong key={idx} className="team-chat-mention">
+                          {segment.text}
+                        </strong>
+                      ) : (
+                        <React.Fragment key={idx}>
+                          {segment.text}
+                        </React.Fragment>
+                      )
+                    )
+                  )}
+                </div>
               </div>
             );
           })
+        )}
+
+        {/* Indicador de estado: Codia está pensando */}
+        {isAiThinking && (
+          <div
+            className="team-chat-thinking-indicator"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="team-chat-thinking-bubble">
+              <span className="team-chat-thinking-text">
+                <strong className="team-chat-thinking-author">
+                  {AI_DISPLAY_NAME}
+                </strong>{" "}
+                está pensando
+              </span>
+              <span className="team-chat-thinking-dots" aria-hidden="true">
+                <span className="dot" />
+                <span className="dot" />
+                <span className="dot" />
+              </span>
+              <span className="team-chat-thinking-askers">
+                ({waitingAskers.join(", ")})
+              </span>
+            </div>
+          </div>
         )}
       </div>
 
@@ -265,20 +485,45 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
 
       {/* Caja de entrada */}
       <div className="team-chat-input-area">
+        {/* Sugerencia de autocompletado para @Codia */}
+        {suggestionMatch && (
+          <div className="team-chat-suggestion-bar">
+            <button
+              type="button"
+              className="team-chat-suggestion-btn"
+              onMouseDown={(e) => {
+                // Prevenir que el textarea pierda el foco al hacer clic
+                e.preventDefault();
+              }}
+              onClick={handleApplySuggestion}
+              title="Autocompletar @Codia"
+            >
+              <span className="team-chat-suggestion-highlight">
+                @{AI_DISPLAY_NAME}
+              </span>
+            </button>
+          </div>
+        )}
+
         <div className="team-chat-textarea-wrapper">
           <textarea
             ref={textareaRef}
             value={inputText}
             onChange={(e) => {
               setInputText(e.target.value);
+              setCursorPosition(e.target.selectionStart ?? e.target.value.length);
               if (error) {
                 onClearError();
               }
             }}
+            onSelect={updateCursorPosition}
+            onClick={updateCursorPosition}
+            onKeyUp={updateCursorPosition}
             onKeyDown={handleKeyDown}
-            placeholder="Escribe un mensaje al equipo… (Enter para enviar)"
+            placeholder="Escribe un mensaje o usa @Codia para consultarle"
             rows={2}
             aria-label="Mensaje para el equipo"
+            disabled={isSending}
           />
           <div className="team-chat-input-footer">
             <span

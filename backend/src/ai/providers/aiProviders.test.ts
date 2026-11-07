@@ -230,6 +230,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Local offline");
         },
+        chatReply: async () => { throw new Error("Local offline"); },
       });
 
       // Mock Groq: configurado y responde exitosamente
@@ -240,6 +241,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           return { operations: [{ action: "createClass", className: "Pedido" }] };
         },
+        chatReply: async () => "mock",
       });
 
       // Mock Gemini: no configurado
@@ -250,6 +252,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Gemini offline");
         },
+        chatReply: async () => { throw new Error("Gemini offline"); },
       });
 
       const result = await editWithFallback({ classes: [], relations: [] }, "crear Pedido");
@@ -271,6 +274,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Gemini offline");
         },
+        chatReply: async () => { throw new Error("Gemini offline"); },
       });
 
       // Mock Local: no configurado
@@ -281,6 +285,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Local offline");
         },
+        chatReply: async () => { throw new Error("Local offline"); },
       });
 
       // Mock Groq: configurado y atiende
@@ -291,6 +296,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           return { operations: [{ action: "createClass", className: "Factura" }] };
         },
+        chatReply: async () => "mock",
       });
 
       const result = await editWithFallback({ classes: [], relations: [] }, "crear Factura");
@@ -310,6 +316,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Local offline");
         },
+        chatReply: async () => { throw new Error("Local offline"); },
       });
 
       registerProvider({
@@ -319,6 +326,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Groq offline");
         },
+        chatReply: async () => { throw new Error("Groq offline"); },
       });
 
       registerProvider({
@@ -328,6 +336,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Gemini offline");
         },
+        chatReply: async () => { throw new Error("Gemini offline"); },
       });
 
       await assert.rejects(
@@ -352,6 +361,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Local offline");
         },
+        chatReply: async () => { throw new Error("Local offline"); },
       });
 
       registerProvider({
@@ -361,6 +371,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Groq offline");
         },
+        chatReply: async () => { throw new Error("Groq offline"); },
       });
 
       registerProvider({
@@ -370,6 +381,7 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
         editDiagramByInstruction: async () => {
           throw new Error("Gemini offline");
         },
+        chatReply: async () => { throw new Error("Gemini offline"); },
       });
 
       const res = await fetch(`${baseUrl}/diagrams/diagram-ai-test-123/ai-edit`, {

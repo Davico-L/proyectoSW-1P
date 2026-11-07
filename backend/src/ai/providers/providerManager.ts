@@ -1,4 +1,4 @@
-import { ProviderId } from "./types";
+import { ProviderId, ChatReplyOptions } from "./types";
 import { groqProvider } from "./groqProvider";
 import { geminiProvider } from "./geminiProvider";
 import { localProvider, getLocalConfig } from "./localProvider";
@@ -275,5 +275,95 @@ export async function editWithFallback(
   }
 
   // Si falló por formato inválido u otro error específico de interpretación, relanzar el último error
+  throw lastError || new Error("AI_ALL_PROVIDERS_FAILED");
+}
+
+// ---------------------------------------------------------------------------
+// 5. Chat de texto libre con respaldo automático (CU19)
+// ---------------------------------------------------------------------------
+
+export interface ChatReplyFallbackResult {
+  text: string;
+  provider: ProviderId;
+  fallback: boolean;
+}
+
+/**
+ * Llama a chatReply usando la misma cadena de respaldo que editWithFallback:
+ * proveedor activo primero, luego los demás en orden base (local → groq → gemini).
+ * Si la respuesta viene vacía o hay error en todos los proveedores, lanza un error.
+ */
+export async function chatWithFallback(
+  systemPrompt: string,
+  userContent: string,
+  options?: ChatReplyOptions
+): Promise<ChatReplyFallbackResult> {
+  const active = activeProviderId;
+  const chain = getFallbackChain(active);
+
+  let lastError: any = null;
+  let anyProviderAttempted = false;
+
+  for (const providerId of chain) {
+    const isHealthy = await checkProviderHealth(providerId);
+    if (!isHealthy) {
+      console.log(`[AI-CHAT-FALLBACK] Proveedor '${providerId}' no disponible. Saltando...`);
+      continue;
+    }
+
+    const provider = getProvider(providerId);
+    if (!provider) {
+      continue;
+    }
+
+    anyProviderAttempted = true;
+    const isFallback = providerId !== active;
+
+    let attempt = 0;
+    const maxAttempts = 2;
+
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        console.log(`[AI-CHAT-FALLBACK] Intentando proveedor '${providerId}' (intento ${attempt})...`);
+        const text = await provider.chatReply(systemPrompt, userContent, options);
+
+        console.log(
+          `[AI-CHAT-FALLBACK] Respuesta de '${providerId}' (fallback: ${isFallback ? "SÍ" : "NO"})`
+        );
+
+        return { text, provider: providerId, fallback: isFallback };
+      } catch (err: any) {
+        lastError = err;
+        console.warn(
+          `[AI-CHAT-FALLBACK] Error en proveedor '${providerId}' (intento ${attempt}):`,
+          err?.message || err
+        );
+
+        const isInvalidResponse = err instanceof Error && err.message === "INVALID_AI_RESPONSE";
+        const isTimeout =
+          err?.message === "AI_TIMEOUT" ||
+          err?.name === "AbortError" ||
+          err?.name === "TimeoutError";
+
+        // ante AI_TIMEOUT del local NO reintenta y pasa directo al siguiente
+        if (providerId === "local" && isTimeout) {
+          console.log(`[AI-CHAT-FALLBACK] AI_TIMEOUT en local. Pasando al siguiente proveedor...`);
+          break;
+        }
+
+        const isConnectionError = isNetworkOrConnectionError(err);
+        const canRetry = (isInvalidResponse || isConnectionError) && attempt === 1;
+
+        if (canRetry) {
+          console.log(`[AI-CHAT-FALLBACK] Reintentando proveedor '${providerId}'...`);
+          continue;
+        }
+
+        break;
+      }
+    }
+  }
+
   throw lastError || new Error("AI_ALL_PROVIDERS_FAILED");
 }

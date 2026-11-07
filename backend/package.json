@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "test": "tsx --test src/mobileGenerator/converter.test.ts src/chat/chatRepository.test.ts src/chat/socketChatEvents.test.ts src/chat/diagramChatEndpoint.test.ts src/ai/providers/aiProviders.test.ts",
+    "test": "tsx --test src/mobileGenerator/converter.test.ts src/chat/chatRepository.test.ts src/chat/socketChatEvents.test.ts src/chat/diagramChatEndpoint.test.ts src/ai/providers/aiProviders.test.ts src/chat/aiChatHelpers.test.ts src/chat/chatContext.test.ts src/chat/aiChatService.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -32,6 +32,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.13.4",
     "@types/pg": "^8.11.11",
+    "socket.io-client": "^4.8.4",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3"
   }

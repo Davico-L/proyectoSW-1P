@@ -8,6 +8,7 @@ import {
   ChatUnavailableError,
   CHAT_COLLECTION_NAME,
 } from "./chatRepository";
+import { AI_DISPLAY_NAME } from "./aiChatHelpers";
 import { getMongoDb, closeMongoConnection, checkMongoConnection } from "../db/mongo";
 
 describe("Repositorio de Mensajes de Chat (chat_messages)", () => {
@@ -354,5 +355,40 @@ describe("Repositorio de Mensajes de Chat (chat_messages)", () => {
       "role",
       "text",
     ]);
+  });
+
+  test("9. saveMessage con role 'ai' exige authorSessionId 'ai' y rechaza cualquier otro", async () => {
+    const diagId = createDiagramId("ai-role-check");
+
+    // Rechaza si authorSessionId no es "ai"
+    await assert.rejects(
+      async () => {
+        await saveMessage({
+          diagramId: diagId,
+          authorSessionId: "session-user-impersonator",
+          authorName: "IA",
+          role: "ai",
+          text: "Mensaje suplantado",
+        });
+      },
+      (err: any) => {
+        assert.ok(err instanceof ChatValidationError);
+        assert.match(err.message, /requieren authorSessionId 'ai'/i);
+        return true;
+      }
+    );
+
+    // Permite si authorSessionId es exactamente "ai"
+    const validAiDoc = await saveMessage({
+      diagramId: diagId,
+      authorSessionId: "ai",
+      authorName: AI_DISPLAY_NAME,
+      role: "ai",
+      text: "Mensaje legítimo de IA",
+    });
+
+    assert.equal(validAiDoc.role, "ai");
+    assert.equal(validAiDoc.authorSessionId, "ai");
+    assert.equal(validAiDoc.authorName, AI_DISPLAY_NAME);
   });
 });

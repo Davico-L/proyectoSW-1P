@@ -801,6 +801,302 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix frontend run test:typecheck`: 0 errores TypeScript (`tsc` completado exitosamente).
   - `npm --prefix backend test`: 42/42 tests aprobados (9 suites completas, 0 fallos).
 
+---
+
+### [RES-070] Funciones puras de mención @ia y formateo con nombre (CU19 Fase 1A)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-070
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatHelpers.ts`: `parseMention(text)` y `ensureAddressedByName(response, name)`.
+  - `backend/src/chat/aiChatHelpers.test.ts`: Suite con 16 pruebas unitarias con `node:test`.
+- **Verificación Realizada**:
+  - `npx tsx --test backend/src/chat/aiChatHelpers.test.ts`: 16/16 tests pasados.
+
+---
+
+### [RES-071] Serialización compacta y construcción de contexto de chat (CU19 Fase 1B)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-071
+- **Entregables Producidos**:
+  - `backend/src/chat/chatContext.ts`: `formatModelCompact(model)` y `buildChatContext(...)`.
+  - `backend/src/chat/chatContext.test.ts`: Suite con 7 pruebas unitarias con `node:test`.
+- **Verificación Realizada**:
+  - `npx tsx --test backend/src/chat/chatContext.test.ts`: 7/7 tests pasados.
+
+---
+
+### [RES-072] Implementación aditiva de chatReply en capa de proveedores (CU19 Fase 2)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-072
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/types.ts`: `ChatReplyOptions` y método `chatReply` en `ModelProvider`.
+  - `backend/src/ai/providers/localProvider.ts`, `groqProvider.ts`, `geminiProvider.ts`: `chatReply`.
+  - `backend/src/ai/providers/providerManager.ts`: `chatWithFallback(...)`.
+  - `backend/src/scripts/testChatReply.ts`: Script de prueba manual de texto libre.
+- **Verificación Realizada**:
+  - `npm --prefix backend test`: 42/42 tests aprobados.
+
+---
+
+### [RES-073] Servicio de chat de IA con cola FIFO y dependencias inyectables (CU19 Fase 3A)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-073
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatHelpers.ts`: `trimToLastSentence(text)`.
+  - `backend/src/chat/aiChatService.ts`: `createAiChatService`, `AiBusyError`, `AiUnavailableError`, `TEAM_AI_SYSTEM_PROMPT`.
+  - `backend/src/chat/aiChatService.test.ts`: Suite con 8 tests unitarios.
+- **Verificación Realizada**:
+  - `npx tsx --test backend/src/chat/aiChatHelpers.test.ts`: 24/24 tests pasados.
+  - `npx tsx --test backend/src/chat/aiChatService.test.ts`: 8/8 tests pasados.
+
+---
+
+### [RES-074] Conexión de aiChatService a Socket.IO y Repositorio de Chat (CU19 Fase 3B)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-074
+- **Entregables Producidos**:
+  - `backend/src/chat/chatRepository.ts`: Soporte de `replyTo`, `addressedTo` y auto-detección de `mentions: ["ia"]`.
+  - `backend/src/socket.ts`: Hook en `chat-message` con `ai-status` ("thinking"/"idle"), invocación de `answerInRoom`, persistencia y broadcast.
+  - `backend/src/scripts/testTeamChatAi.ts`: Script de prueba de integración Socket.IO con dos clientes (5 escenarios).
+- **Verificación Realizada**:
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 5/5 pruebas aprobadas.
+
+---
+
+### [RES-075] Verificación Integral de CU19 antes de la Fase 4
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-075
+- **Entregables Producidos**:
+  - `backend/package.json`: Inclusión de `aiChatHelpers.test.ts`, `chatContext.test.ts` y `aiChatService.test.ts` en script `"test"`.
+  - `backend/src/scripts/testTeamChatAi.ts` y `backend/scripts/testTeamChatAi.ts`: Ampliación a 7 escenarios de integración:
+    1. Verificación de secuencia `ai-status` thinking/idle con `askerName: "Ana"`.
+    2. Consulta `@ia` a secas.
+    3. Mensaje normal sin activación de IA.
+    4. Dos consultas concurrentes resueltas en orden FIFO.
+    5. Historial `GET /diagrams/:id/chat` con mensajes de IA y metadatos.
+    6. Saturación de cola con 6 consultas rápidas (1 activa + 5 en espera + 6ª rechazada con `AiBusyError`).
+    7. Fallo de proveedores simulado con `AiUnavailableError` emitiendo mensaje de reintento.
+  - Análisis forense de suplantación de identidad para `role: "ai"` y `authorName: "IA"`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores.
+  - `npm --prefix backend test`: 81/81 pruebas aprobadas (17 suites completas).
+  - `npx tsx backend/scripts/testTeamChatAi.ts`: 7/7 pruebas de integración aprobadas (exit code 0).
+
+---
+
+### [RES-076] Cierre de Verificación de CU19 y Mitigación de Suplantación
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-076
+- **Entregables Producidos**:
+  - `backend/src/socket.ts` (**modificado**): En `chat-join`, normalización de `session.username` (`trim().toLowerCase() === "ia"`); si coincide, asigna `authorName: "IA (usuario)"` sin rechazar la conexión.
+  - `backend/src/chat/chatRepository.ts` (**modificado**): En `saveMessage`, validación estricta de que si `role === "ai"`, `authorSessionId` debe ser forzosamente `"ai"` (rechaza cualquier otro valor con `ChatValidationError`).
+  - `backend/src/chat/chatRepository.test.ts` (**modificado**): Agregada prueba 9 verificando el rechazo de `role: "ai"` con sesiones de usuario y aceptación con `"ai"`.
+  - `backend/src/chat/socketChatEvents.test.ts` (**modificado**): Agregada prueba 8 verificando la transformación de `username: "  Ia  "` a `authorName: "IA (usuario)"` en `chat-join`.
+  - Unificación de scripts: eliminado el archivo puente `backend/scripts/testTeamChatAi.ts`, manteniendo la única copia autoritativa en `backend/src/scripts/testTeamChatAi.ts` y `testChatReply.ts` en `backend/src/scripts/testChatReply.ts`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - `npm --prefix backend test`: 83/83 pruebas aprobadas (17 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 pruebas de integración aprobadas exitosamente.
+
+---
+
+### [RES-077] Identidad y Nombre Propio "Codia" para la IA del Equipo (CU19)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-077
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatHelpers.ts` (**modificado**):
+    - Exportadas las constantes `AI_DISPLAY_NAME = "Codia"` y `AI_MENTION_ALIASES = ["ia", "codia"]`.
+    - `parseMention` actualizado para detectar `@ia` y `@codia` de forma insensible a mayúsculas como palabra completa (`/(?<=^|\s)@(?:ia|codia)(?=[\s\p{P}]|$)/iu`).
+  - `backend/src/socket.ts` (**modificado**):
+    - Reemplazo de `authorName: "IA"` por `authorName: AI_DISPLAY_NAME` en las respuestas de la IA, mensajes de IA ocupada (`AiBusyError`) y mensajes de indisponibilidad (`AiUnavailableError`).
+    - En `chat-join`, normalización de usuario: si `normalizedUser === "ia" || normalizedUser === "codia"`, asigna `authorName: "{nombre} (usuario)"` (`"IA (usuario)"` o `"Codia (usuario)"`).
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - Actualizado `TEAM_AI_SYSTEM_PROMPT` con la directiva: *"Te llamas Codia. Eres la desarrolladora senior y mentora del equipo. Si te preguntan quién eres, te presentas como Codia, la desarrolladora senior y mentora del equipo."*
+  - `backend/src/chat/aiChatHelpers.test.ts` (**modificado**): Pruebas añadidas para `AI_DISPLAY_NAME`, `AI_MENTION_ALIASES`, menciones `@codia`, `@Codia`, `@ia`, y no activación ante `@codiax` o correos.
+  - `backend/src/chat/socketChatEvents.test.ts` (**modificado**): Prueba 9 añadida para `username: "  Codia  "` transformado a `"Codia (usuario)"`.
+  - `backend/src/chat/chatRepository.test.ts` (**modificado**): Prueba 9 ajustada con `AI_DISPLAY_NAME`.
+  - `backend/src/scripts/testTeamChatAi.ts` (**modificado**): Integración adaptada para validar `authorName: AI_DISPLAY_NAME` ("Codia") en los 7 escenarios.
+- **Archivos NO Modificados**:
+  - `diagramRoutes.ts`, `ai-edit`, `applyAiOperations`, `operationValidator`, lienzo, panel personal y frontend permanecieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript.
+  - `npm --prefix backend test`: 88/88 pruebas aprobadas (17 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 pruebas de integración aprobadas (exit code 0).
+
+---
+
+### [RES-078] Soporte Visual, Menciones y Auto-scroll de Codia en el Chat del Equipo (CU19 Fase 4A Frontend)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-078
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/types.ts` (**modificado**):
+    - Exportada constante `AI_DISPLAY_NAME = "Codia"`.
+    - Ampliado `PublicChatMessage` con `role: "user" | "ai" | "system" | string`, y campos opcionales `replyTo?: string` y `addressedTo?: string`.
+  - `frontend/src/teamChat/mentionHelper.ts` (**creado**):
+    - Función pura `formatMessageSegments(text: string): MessageSegment[]` para segmentar mensajes separando de forma segura menciones `@ia` y `@codia` (case-insensitive como palabra completa) sin usar `dangerouslySetInnerHTML`.
+  - `frontend/src/teamChat/mentionHelper.test.ts` (**creado**):
+    - Suite de 10 pruebas unitarias con Vitest cubriendo menciones al inicio, medio, fin con puntuación, case-insensitivity, no activación en correos o palabras compuestas, mensajes de una sola mención y saltos de línea.
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**modificado**):
+    - Decisión estricta de burbuja IA por `msg.role === "ai"` (nunca por nombre).
+    - En mensajes de IA: renderizado de autor como `msg.authorName || AI_DISPLAY_NAME`, badge `<span className="team-chat-msg-badge-ai">IA</span>`, y si existe `addressedTo`: `<span className="team-chat-msg-addressed">para {msg.addressedTo}</span>`.
+    - Texto de la IA renderizado como texto plano con saltos de línea preservados (`white-space: pre-wrap`), sin interpretar HTML ni Markdown.
+    - En mensajes humanos (`role !== "ai"`): formateo con `formatMessageSegments` resaltando menciones en `<strong className="team-chat-mention">`.
+  - `frontend/src/teamChat/TeamChat.scss` (**modificado**):
+    - Estilo de burbuja `.team-chat-msg--ai` diferenciado con fondo lavanda/violeta `#f3e8ff`, texto `#3b0764`, borde `#d8b4fe`, alineado a la izquierda.
+    - Badge IA `.team-chat-msg-badge-ai` en fondo violeta `#7e22ce` y texto blanco.
+    - Estilo de mención `.team-chat-mention` en negrita violeta (con ajuste de alto contraste en mensajes propios y en modo oscuro).
+    - Soporte completo para `.theme--dark` y `[data-theme="dark"]` con fondo `#2e1065`, texto `#f3e8ff`, borde `#7e22ce` y menciones `#c084fc`.
+- **Archivos NO Modificados**:
+  - Lienzo y sincronización de Excalidraw, panel de IA personal (`AiChatPanel.tsx`, `AiChatButton.tsx`), `realtimeSync.ts` y rutas del backend permanecieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat/mentionHelper.test.ts --run`: 10/10 pruebas unitarias aprobadas.
+  - `yarn --cwd frontend test:typecheck`: 0 errores TypeScript (`tsc` exit code 0).
+  - `npm --prefix backend test`: 88/88 pruebas aprobadas (17 suites completas).
+
+---
+
+### [RES-079] Indicador de Estado "Codia está pensando" y Autocompletado @Codia (CU19 Fase 4B Frontend)
+- **Fecha**: 2026-11-06
+- **Tarea Asociada**: TSK-079
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/mentionHelper.ts` (**modificado**):
+    - Añadida la función pura `getMentionSuggestionMatch(text: string, cursorPos: number): MentionSuggestionMatch | null` para detectar si la palabra que se está escribiendo es un prefijo incompleto de `@Codia` o `@ia` (case-insensitive: `@`, `@c`, `@co`, `@cod`, `@codi`, `@i`). Retorna `null` si ya está completa (`@codia`, `@ia`), si no empieza por `@` (`correo@c`) o si es otro prefijo (`@xyz`).
+  - `frontend/src/teamChat/mentionHelper.test.ts` (**modificado**):
+    - Ampliada la suite con 8 pruebas adicionales para `getMentionSuggestionMatch` (18 pruebas en total), todas aprobadas.
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**modificado**):
+    - Escucha del evento `ai-status` en Socket.IO con limpieza al desmontar (`socket.off("ai-status")`).
+    - Ignora eventos de otro `diagramId`.
+    - Conteo por `askerName`: `thinking` suma 1, `idle` resta 1 (mínimo 0).
+    - Timeout de seguridad de 60 s que limpia automáticamente el estado si no llega `idle`.
+    - Reseteo completo de contadores al cambiar de diagrama (`diagramId`) o al reconectar el socket (`socket.on("connect")`).
+    - Renderizado accesible con `aria-live="polite"` del bloque: `"Codia IA está pensando… ({askers})"` con puntos animados y lista de personas esperando.
+    - Actualizado placeholder del textarea: `"Escribe un mensaje o usa @Codia para consultar a la IA"`.
+    - Barra flotante de sugerencia clicable `"@Codia — Consultar a la IA"` al escribir `@...`; reemplaza la palabra incompleta por `"@Codia "` y reenfoca el textarea.
+    - Cuadro de texto y botón de envío completamente no bloqueantes mientras la IA piensa (las personas pueden seguir conversando).
+  - `frontend/src/teamChat/TeamChat.scss` (**modificado**):
+    - Estilos para `.team-chat-thinking-indicator`: burbuja lavanda/violeta con autor `Codia`, badge `IA`, puntos con animación `@keyframes team-chat-dot-bounce`, y texto de espera cursivo.
+    - Estilos para `.team-chat-suggestion-bar`: popup flotante encima del cuadro de texto con sombra y hover acentuado.
+    - Soporte completo en tema claro y oscuro (`.theme--dark`, `[data-theme="dark"]`).
+  - `frontend/src/teamChat/useTeamChat.ts` (**modificado**): Exposición de `diagramId` en el objeto retornado.
+  - `frontend/excalidraw-app/App.tsx` (**modificado**): Paso explícito de `diagramId={teamChat.diagramId}` a `TeamChatPanel`.
+- **Archivos NO Modificados**:
+  - Lienzo y sincronización de Excalidraw, panel de IA personal (`AiChatPanel.tsx`, `AiChatButton.tsx`), `realtimeSync.ts` y backend permanecieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat/mentionHelper.test.ts --run`: 18/18 pruebas aprobadas (100% éxito).
+  - `yarn --cwd frontend test:typecheck`: 0 errores TypeScript (`tsc` exit code 0).
+  - `yarn --cwd frontend build`: Build de Vite completado exitosamente con código de salida 0.
+
+---
+
+### [RES-080] Ajuste Fino del Indicador ai-status y Ampliación de Timeout a 180s (CU19 Frontend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-080
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**modificado**):
+    - Retirada la etiqueta/badge "IA" del indicador de estado `ai-status` en `.team-chat-thinking-bubble`, dejándola exclusivamente en las cabeceras de los mensajes de Codia.
+    - El indicador muestra exactamente `{AI_DISPLAY_NAME} está pensando…` junto con los puntos animados y los nombres de quienes esperan entre paréntesis `(Ana, Luis)`.
+    - Ampliado el temporizador de seguridad de 60 s a 180 s (`180000` ms) para permitir respuestas extensas de proveedores sin que el indicador se limpie prematuramente si el evento `idle` demora.
+- **Archivos NO Modificados**:
+  - Lienzo y sincronización de Excalidraw, panel de IA personal (`AiChatPanel.tsx`, `AiChatButton.tsx`), `realtimeSync.ts`, rutas y lógica de backend permanecieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat/mentionHelper.test.ts --run`: 18/18 pruebas aprobadas (100% éxito).
+  - `yarn --cwd frontend test:typecheck`: 0 errores TypeScript (`tsc` exit code 0).
+  - `yarn --cwd frontend build`: Build de Vite completado exitosamente con código de salida 0.
+
+---
+
+### [RES-081] Ajustes de Backend en CU19: Prompt UML de Codia y Minúscula Contextual en ensureAddressedByName
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-081
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - Actualizado `TEAM_AI_SYSTEM_PROMPT`:
+      - Longitud fijada en unas 120 palabras (salvo solicitud explícita de mayor detalle).
+      - Formato: solo texto plano, permitiendo únicamente **negrita** puntual y `código en línea`, sin encabezados (`#`) ni tablas, y bloques de código ` ``` ` exclusivamente si el usuario pide código de forma explícita.
+      - Directiva estricta de no asumir lenguaje ni tecnología (no dar Java, SQL ni JPA sin petición explícita), respondiendo en términos de UML y del diagrama del equipo.
+      - Notas de notación UML: atributo derivado con `/` antes del nombre (ej. `/edad`), composición con rombo relleno en el lado del todo (partes no existen sin el todo), agregación con rombo vacío (partes independientes) y multiplicidades `1`, `0..1`, `*`, `1..*`.
+  - `backend/src/chat/aiChatHelpers.ts` (**modificado**):
+    - En `ensureAddressedByName`: cuando se antepone `"{nombre}, "`, se pasa a minúscula la primera letra de la respuesta original mediante `lowerFirstIfNotAcronym`, salvo que la primera palabra sea una sigla o nombre en mayúsculas (detectado al tener también su segunda letra en mayúsculas, ej. `"UML"`, `"SQL"`, `"DTO"`).
+  - `backend/src/chat/aiChatHelpers.test.ts` (**modificado**):
+    - Agregadas pruebas unitarias para `"Para asociar" → "Ana, para asociar"`, `"UML es" → "Ana, UML es"`, `"SQL es" → "Ana, SQL es"` y `"Ana, hola"` inalterado.
+  - `backend/src/chat/aiChatService.test.ts` (**modificado**):
+    - Actualizadas aserciones de respuesta para reflejar la minúscula inicial (`"Davico, veo dos clases..."`, `"Ana, la relación..."`).
+    - Añadidas aserciones que validan las directivas y notas de notación UML en `TEAM_AI_SYSTEM_PROMPT`.
+    - Agregada prueba 11 comprobando conservación de mayúsculas en siglas al inicio de la respuesta en `answerInRoom`.
+- **Archivos NO Modificados**:
+  - `diagramRoutes.ts`, `ai-edit`, UC7/8/9/17, `applyAiOperations`, `operationValidator`, lienzo, panel de IA personal y frontend permanecieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 92/92 pruebas aprobadas (17 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados (exit code 0).
+
+---
+
+### [RES-082] Formateador Ligero para Respuestas de Codia y Ajustes de UI en Team Chat (CU19 Frontend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-082
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/aiTextFormatter.tsx` (**creado**):
+    - Módulo puro para segmentación y renderizado seguro de respuestas de la IA.
+    - Exporta tipos `AiTextSegment` y funciones `parseAiTextSegments(text: string): AiTextSegment[]` y `renderAiFormattedText(text: string): React.ReactNode`.
+    - Soporta exclusivamente:
+      1. Bloques de código con ```lenguaje ... ``` (mapeados a `<pre className="team-chat-code-block" data-language={lang}><code className="team-chat-code-content">{code}</code></pre>`).
+      2. Código en línea con `...` (mapeado a `<code className="team-chat-inline-code">{code}</code>`).
+      3. Negrita puntual con **...** (delimitadores CommonMark, mapeado a `<strong className="team-chat-bold">{text}</strong>`).
+    - Cero uso de `dangerouslySetInnerHTML`: todo HTML inyectado o escrito por el modelo es escapado y renderizado como texto plano.
+    - Bloques de código no cerrados (``` sin cierre) y asteriscos sueltos (`*item*`, `**incompleto`, `2 * 3 = 6`) se tratan estrictamente como texto plano.
+  - `frontend/src/teamChat/aiTextFormatter.test.ts` (**creado**):
+    - Suite exhaustiva con 11 pruebas unitarias cubriendo los 8 casos exigidos más validación de elementos React y robustez ante cadenas vacías/nulas.
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**modificado**):
+    - Sugerencia de mención al escribir "@": simplificada para mostrar únicamente `@Codia` (eliminado el texto `— Consultar a la IA`).
+    - Placeholder del cuadro de texto actualizado a `"Escribe un mensaje o usa @Codia para consultarle"`.
+    - Renderizado del cuerpo del mensaje: aplica `renderAiFormattedText(msg.text)` únicamente a mensajes con `role === "ai"`, manteniendo intacto `formatMessageSegments` para los mensajes de usuarios.
+  - `frontend/src/teamChat/TeamChat.scss` (**modificado**):
+    - Estilos específicos para `.team-chat-code-block`, `.team-chat-code-content`, `.team-chat-inline-code` y `.team-chat-bold`.
+    - Tema claro: bloques con fondo `#faf5ff`, borde `#d8b4fe`, color `#3b0764`, fuente monospace y scroll horizontal (`overflow-x: auto`) para evitar ensanchar el panel.
+    - Tema oscuro: bloques con fondo `#18092e`, borde `#581c87`, color `#f3e8ff`.
+  - `frontend/src/teamChat/index.ts` (**modificado**):
+    - Exporta `aiTextFormatter`.
+- **Archivos NO Modificados**:
+  - Lienzo y su sincronización, `realtimeSync.ts`, panel de IA personal (`AiChatPanel.tsx`, `AiChatButton.tsx`) y backend se mantuvieron estrictamente intactos.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat --run`: 29/29 pruebas aprobadas (18 en `mentionHelper.test.ts` y 11 en `aiTextFormatter.test.ts`).
+  - `yarn --cwd frontend test:typecheck`: 0 errores TypeScript (`tsc` exit code 0).
+  - `yarn --cwd frontend build`: Compilación de producción con Vite completada exitosamente con código de salida 0.
+
+---
+
+### [RES-083] Refinamiento de Directrices en TEAM_AI_SYSTEM_PROMPT para Codia (CU19 Backend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-083
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - Actualizado `TEAM_AI_SYSTEM_PROMPT` con las directrices estrictas solicitadas:
+      1. *Ejemplos conceptuales*: Explicación mediante ejemplo simple y genérico (ej. Persona con `/edad`), utilizando el diagrama del equipo solo si el concepto encaja de verdad con sus clases sin forzar el ejemplo.
+      2. *Fidelidad al diagrama*: Prohibición estricta de inventar clases, atributos o relaciones como si existieran; si propone algo nuevo, debe señalar explícitamente que es una sugerencia.
+      3. *Honestidad intelectual*: Declarar abiertamente si no está segura de algo en lugar de inventar.
+      4. *Formato de énfasis*: Prohibición de cursiva con asterisco simple; uso exclusivo de **negrita** para énfasis.
+      5. *Relaciones UML puras*: Explicación de relaciones basada en asociación y multiplicidad, sin proponer claves foráneas ni atributos tipo `productoId` salvo consulta explícita sobre base de datos.
+  - `backend/src/chat/aiChatService.test.ts` (**modificado**):
+    - Incorporadas aserciones que validan la presencia de las nuevas reglas en `TEAM_AI_SYSTEM_PROMPT`:
+      - `/No uses cursiva con asterisco simple/i`
+      - `/En preguntas conceptuales, explica con un ejemplo simple y genérico/i`
+      - `/Nunca inventes clases, atributos ni relaciones/i`
+      - `/Si no estás segura de algo, dilo en vez de inventar/i`
+      - `/habla de la asociación y su multiplicidad; no propongas claves foráneas/i`
+- **Archivos NO Modificados**:
+  - Ningún otro archivo del backend ni del frontend fue alterado.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 92/92 pruebas aprobadas (17 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados (exit code 0).
+
+
+
+
+
+
+
 
 
 

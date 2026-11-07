@@ -6,6 +6,146 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-083
+- **Nombre**: Refinamiento de directrices en TEAM_AI_SYSTEM_PROMPT para Codia (CU19 Backend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/src/chat/aiChatService.ts`: incorporar o sustituir reglas en `TEAM_AI_SYSTEM_PROMPT` manteniendo el resto: (1) Preguntas conceptuales explicadas con ejemplos simples y genéricos (ej. Persona con /edad), usando el diagrama del equipo solo si encaja de verdad sin forzarlo; (2) Nunca inventar clases/atributos/relaciones como si ya existieran (indicar claramente si es sugerencia); (3) Decir honestamente si no está segura en vez de inventar; (4) No usar cursiva con asterisco simple, solo **negrita** para énfasis; (5) En relaciones UML, hablar de la asociación y su multiplicidad, no proponer FKs ni atributos tipo "productoId" salvo preguntas de BD. Actualizar pruebas en `aiChatService.test.ts`, validar con `npm test` (92/92) y `typecheck` (0 errores).
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-082
+- **Nombre**: Formateador ligero para respuestas de Codia (código y negrita) y ajustes de UI en Team Chat (CU19 Frontend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En el frontend del Chat del Equipo: (1) Modificar la sugerencia flotante al teclear "@" para mostrar exclusivamente "@Codia"; (2) Actualizar el placeholder del textarea a "Escribe un mensaje o usa @Codia para consultarle"; (3) Crear `aiTextFormatter.tsx` con función pura para renderizar respuestas de la IA soportando bloques de código (```lenguaje ... ```), código en línea (`...`) y negrita (**...**) sin `dangerouslySetInnerHTML`, tratando bloques y asteriscos incompletos como texto plano, con HTML no interpretado y estilos CSS dedicados (fondo, fuente monospace, overflow-x: auto); (4) Suite de 11 pruebas unitarias con Vitest; validar con pruebas (29/29 en teamChat), typecheck (0 errores) y build exitoso.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-081
+- **Nombre**: Ajustes de backend en CU19: prompt del sistema UML de Codia y minúscula contextual en ensureAddressedByName
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En el backend de CU19: (1) En `TEAM_AI_SYSTEM_PROMPT` (`aiChatService.ts`): ajustar longitud (~120 palabras), formato (solo texto plano con negrita puntual y código en línea, sin encabezados ni tablas, bloques de código solo si lo piden expresamente), no asumir lenguaje/tecnología (responder en UML/diagrama del equipo) y agregar notas de notación UML (atributos derivados `/nombre`, composición con rombo relleno, agregación con rombo vacío, multiplicidades 1, 0..1, *, 1..*); (2) En `ensureAddressedByName` (`aiChatHelpers.ts`): al anteponer `"{nombre}, "`, pasar a minúscula la primera letra salvo si la segunda letra también es mayúscula (siglas como "UML", "SQL"); (3) Actualizar y agregar pruebas en `aiChatHelpers.test.ts`, `aiChatService.test.ts`, ejecutar `npm test` (92/92), `typecheck` (0 errores) y `testTeamChatAi.ts` (7/7).
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-080
+- **Nombre**: Ajuste fino del indicador ai-status y ampliación de timeout a 180s (CU19 Frontend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `TeamChatPanel.tsx` (y `TeamChat.scss` si aplica): (1) Ajustar el indicador de `ai-status` para mostrar exactamente `{AI_DISPLAY_NAME} está pensando…` sin la etiqueta ni palabra "IA" junto al nombre, conservando puntos animados y la lista de nombres de quienes esperan entre paréntesis `(Ana, Luis)`, reservando la etiqueta "IA" exclusivamente para la cabecera de mensajes de Codia; (2) Incrementar el tiempo de seguridad del indicador de 60 s a 180 s (180000 ms). Validar con typecheck y build en frontend.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-079
+- **Nombre**: Indicador de estado "pensando" y sugerencia de autocompletado @Codia en Frontend (CU19 Fase 4B)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Implementar en el frontend (Chat del Equipo): (1) Escucha del evento "ai-status" ({ diagramId, state, askerName }) en TeamChatPanel con conteo por askerName ("thinking" +1, "idle" -1), ignorando otros diagramas, reseteo en reconexión/cambio de diagrama y timeout de seguridad de 60 s; renderizado accesible (aria-live="polite") de "Codia está pensando…" con animación de puntos y lista de espera "(Ana, Luis)"; (2) Placeholder "Escribe un mensaje o usa @Codia para consultar a la IA", detección de prefijo @, @c..., @i... mostrando popup/sugerencia clicable "@Codia — Consultar a la IA" que reemplaza la palabra por "@Codia " y reenfoca el textarea; (3) Garantizar que el textarea no se bloquee mientras la IA piensa. Validado con vitest (18/18), typecheck (0 errores) y build exitoso.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-078
+- **Nombre**: Soporte visual y menciones de Codia en el Chat del Equipo en Frontend (CU19 Fase 4A)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Implementar en el frontend el soporte para mensajes y menciones de la IA Codia en el Chat del Equipo: (1) Ampliar el tipo `PublicChatMessage` con `role: "user" | "ai" | "system" | string`, `replyTo?: string`, `addressedTo?: string`, y definir constante `AI_DISPLAY_NAME = "Codia"`; (2) Renderizado distintivo para `role === "ai"` (decidido estrictamente por rol, nunca por nombre, alineado a izquierda, fondo temático violeta `#f3e8ff` con texto `#3b0764` y border `#d8b4fe`, soporte dark mode `#2e1065`, badge "IA", texto "para {addressedTo}" si existe, `white-space: pre-wrap`); (3) Función pura `formatMessageSegments` en `mentionHelper.ts` para resaltar menciones `@ia` y `@codia` en negrita con color de acento de la IA en mensajes de personas sin usar `dangerouslySetInnerHTML`, con 10 pruebas unitarias en `mentionHelper.test.ts`; (4) Historial asegurado con deduplicación por `id` y orden cronológico en `useTeamChat.ts`; (5) Auto-scroll garantizado con respuestas de la IA. Validado con `vitest` (10/10), `test:typecheck` (0 errores) y `backend test` (88/88).
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-077
+- **Nombre**: Asignación de identidad y nombre propio "Codia" a la IA del equipo (CU19)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Incorporar el nombre propio "Codia" a la IA: (1) En `aiChatHelpers.ts`, exportar `AI_DISPLAY_NAME = "Codia"` y `AI_MENTION_ALIASES = ["ia", "codia"]`; (2) Adaptar `parseMention` para detectar `@ia` o `@codia` case-insensitive como palabra completa, preservando `mentions: ["ia"]` como identificador interno; (3) Reemplazar `authorName: "IA"` por `AI_DISPLAY_NAME` en las respuestas normales, aviso de ocupada y aviso de indisponibilidad en `socket.ts`; (4) En `TEAM_AI_SYSTEM_PROMPT`, indicar que su nombre es Codia y presentarse como la desarrolladora senior y mentora del equipo si preguntan quién es; (5) En `chat-join`, mitigar suplantación si el username normalizado es "ia" o "codia" transformándolo en `"{nombre} (usuario)"`; (6) Actualizar pruebas unitarias (`aiChatHelpers.test.ts`, `socketChatEvents.test.ts`, `chatRepository.test.ts`) agregando casos para `@codia`, `@Codia`, `@ia` y rechazo de `@codiax`, y actualizar `testTeamChatAi.ts`. Validar con `npm test` y `typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-076
+- **Nombre**: Cierre de verificación de CU19 y mitigación de suplantación de identidad
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Ejecutar los 4 pasos de cierre: (1) Revisar `git diff package-lock.json` confirmando adición de `socket.io-client` como nueva devDependency para tests; (2) Unificar scripts manuales en `backend/src/scripts/` eliminando el archivo puente de `backend/scripts/`; (3) Comparar y confirmar equivalencia en la cadena de fallback entre `chatWithFallback` y `editWithFallback`; (4) Aplicar arreglo de suplantación en `chat-join` (username "ia" -> "IA (usuario)") y en `saveMessage` (exigir authorSessionId "ai" para role "ai"); añadir pruebas unitarias específicas, verificar `npm test` (83 pruebas pasadas) y `typecheck` (0 errores).
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-075
+- **Nombre**: Verificación integral de CU19 antes de la Fase 4
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Ejecutar las 4 verificaciones previas a la Fase 4: (1) Actualizar el script "test" en backend/package.json incorporando las suites de chat (aiChatHelpers, chatContext, aiChatService), correr npm test y reportar nuevo total (81 tests aprobados); (2) Ampliar testTeamChatAi.ts validando estados ai-status ("thinking" antes, "idle" después con askerName), prueba de concurrencia con 6 consultas rápidas (rechazo de la 6ta por cola llena con AiBusyError), y prueba de fallo de proveedores (AiUnavailableError con mensaje de reintento al usuario) pasando los 7 escenarios exitosamente; (3) Analizar si un cliente socket puede suplantar role "ai" o authorName "IA" en chat-message y proponer mitigación mínima sin aplicarla; (4) Ejecutar git status y git diff --stat verificando los archivos involucrados y garantizando que diagramRoutes.ts, ai-edit, lienzo y panel personal permanecen intactos.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-074
+- **Nombre**: Conexión aditiva de aiChatService al chat del equipo con Socket.IO y persistencia (CU19 Fase 3B)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Conectar `aiChatService` al chat del equipo de forma puramente aditiva: (1) En `chatRepository.ts`, agregar campos opcionales `replyTo` y `addressedTo` en tipos internos, Mongo y públicos (`toPublicChatMessage`), y registrar automáticamente `mentions: ["ia"]` si el texto incluye `@ia` con `parseMention`; (2) En `socket.ts`, tras emitir `chat-message` y responder al callback, enganchar en segundo plano la atención de IA si `role === "user"` y contiene `@ia`: emitir `ai-status` ("thinking"), invocar `answerInRoom`, persistir con role "ai", authorName "IA", replyTo y addressedTo, emitir a la sala y en `finally` resetear `ai-status` a "idle", con manejo específico de `AiUnavailableError` y `AiBusyError`; (3) Crear script de prueba de integración Socket.IO `testTeamChatAi.ts` con dos clientes (Ana y Luis) validando los 5 escenarios (consulta con respuesta dirigida, consulta vacía, mensaje sin mención, preguntas simultáneas en orden FIFO y consulta a `GET /diagrams/:id/chat` con mensajes de IA). Sin tocar ai-edit, lienzo ni diagramRoutes.ts.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-073
+- **Nombre**: Servicio de chat de IA con cola FIFO y dependencias inyectables (CU19 Fase 3A)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Implementar `trimToLastSentence` en `aiChatHelpers.ts` (con sus pruebas unitarias). Crear `backend/src/chat/aiChatService.ts` con fábrica `createAiChatService(deps)` con dependencias inyectadas (`getDiagramModel`, `listRecentMessages`, `chat`), errores exportados `AiBusyError` y `AiUnavailableError`, constante `TEAM_AI_SYSTEM_PROMPT` y método `answerInRoom` (operations siempre vacío, manejo de pregunta vacía, armado de contexto con exclusión de `askerMessageId`, pipeline de salida: trimToLastSentence, ensureAddressedByName y corte a 3000 caracteres; cola FIFO mono-ejecución con tope de 5 pendientes además de la activa y recuperación ante fallos). Crear suite exhaustiva `aiChatService.test.ts` con falsos cubriendo los 8 casos requeridos.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-072
+- **Nombre**: Implementación aditiva de chatReply en la capa de proveedores IA (CU19 Fase 2)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Agregar de forma puramente aditiva el método `chatReply(systemPrompt, userContent, options?)` a `ModelProvider` en `types.ts`, implementarlo en `localProvider.ts`, `groqProvider.ts` y `geminiProvider.ts` reutilizando configuración, cliente y manejo de errores de cada proveedor (45 s timeout en local), agregar `chatWithFallback()` en `providerManager.ts` con la misma cadena de respaldo que `editWithFallback`, crear el script manual `backend/src/scripts/testChatReply.ts` y actualizar los mocks del test existente `aiProviders.test.ts` para que incluyan `chatReply`. Sin modificar `editDiagramByInstruction`, `ai-edit`, ni el flujo UC7/UC8/UC9/UC17.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-071
+- **Nombre**: Serialización compacta del modelo y construcción de contexto de chat (CU19 Fase 1B)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Crear el nuevo módulo `backend/src/chat/chatContext.ts` con dos funciones puras exportadas: `formatModelCompact(model)` (resolución de ids a nombres de clase con Map, serialización con atributos, métodos breves y relaciones legibles con multiplicidades, límite de 40 clases con mención de omitidas, manejo de diagrama vacío y omisión de ids inexistentes) y `buildChatContext({ modelCompact, recentMessages, askerName, question })` (inclusión de últimos 10 mensajes recortados a 300 caracteres, bloque de diagrama actual, bloque de conversación reciente condicional y línea final con la pregunta del usuario). Crear su suite de pruebas unitarias `chatContext.test.ts` con `node:test` cubriendo los 7 casos requeridos. Sin modificar archivos existentes.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-070
+- **Nombre**: Creación de funciones puras de soporte para mención @ia y formateo con nombre (CU19 Fase 1A)
+- **Fecha de Inicio**: 2026-11-06
+- **Estado**: Completada
+- **Objetivo**: Crear el nuevo módulo `backend/src/chat/aiChatHelpers.ts` con dos funciones puras exportadas: `parseMention` (detección case-insensitive de @ia como palabra completa, exclusión de emails y palabras compuestas como @iab, extracción de la pregunta con espacios colapsados y recorte) y `ensureAddressedByName` (comprobación de presencia de nombre en primeros 40 caracteres y anteposición de nombre si no está presente). Crear su suite de pruebas unitarias `aiChatHelpers.test.ts` con `node:test` cubriendo todos los casos de posición, mayúsculas, cadenas vacías y exclusiones. Sin modificar ningún archivo existente de código.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-069
 - **Nombre**: Corrección de selección de proveedores IA y cadena de fallback circular (CU24)
 - **Fecha de Inicio**: 2026-11-06

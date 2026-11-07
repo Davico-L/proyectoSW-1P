@@ -1,5 +1,6 @@
 import { Collection, ObjectId } from "mongodb";
 import { getMongoDb } from "../db/mongo";
+import { parseMention } from "./aiChatHelpers";
 
 export const CHAT_COLLECTION_NAME = "chat_messages";
 export const DEFAULT_MESSAGE_LIMIT = 50;
@@ -28,6 +29,8 @@ export interface ChatMessageInput {
   text: string;
   mentions?: string[];
   proposal?: any;
+  replyTo?: string;
+  addressedTo?: string;
 }
 
 export interface ChatMessageDocument {
@@ -39,6 +42,8 @@ export interface ChatMessageDocument {
   text: string;
   mentions?: string[];
   proposal?: any;
+  replyTo?: string;
+  addressedTo?: string;
   createdAt: Date;
 }
 
@@ -51,6 +56,8 @@ export interface PublicChatMessage {
   createdAt: Date;
   mentions?: string[];
   proposal?: any;
+  replyTo?: string;
+  addressedTo?: string;
 }
 
 /**
@@ -77,6 +84,14 @@ export const toPublicChatMessage = (
     publicMsg.proposal = doc.proposal;
   }
 
+  if (typeof doc.replyTo === "string" && doc.replyTo.trim() !== "") {
+    publicMsg.replyTo = doc.replyTo.trim();
+  }
+
+  if (typeof doc.addressedTo === "string" && doc.addressedTo.trim() !== "") {
+    publicMsg.addressedTo = doc.addressedTo.trim();
+  }
+
   return publicMsg;
 };
 
@@ -89,6 +104,8 @@ export interface MongoChatMessageDoc {
   text: string;
   mentions?: string[];
   proposal?: any;
+  replyTo?: string;
+  addressedTo?: string;
   createdAt: Date;
 }
 
@@ -156,6 +173,12 @@ export const saveMessage = async (
     throw new ChatValidationError("El authorName es obligatorio");
   }
 
+  if (role === "ai" && authorSessionId !== "ai") {
+    throw new ChatValidationError(
+      "Los mensajes con rol 'ai' requieren authorSessionId 'ai'"
+    );
+  }
+
   if (!trimmedText) {
     throw new ChatValidationError("El texto del mensaje no puede estar vacío");
   }
@@ -178,14 +201,36 @@ export const saveMessage = async (
     await ensureChatIndexes(collection);
 
     const now = new Date();
+
+    const mentionsList: string[] = Array.isArray(input.mentions)
+      ? [...input.mentions]
+      : [];
+
+    const mentionCheck = parseMention(trimmedText);
+    if (mentionCheck.mentioned && !mentionsList.includes("ia")) {
+      mentionsList.push("ia");
+    }
+
+    const replyTo =
+      typeof input?.replyTo === "string" && input.replyTo.trim() !== ""
+        ? input.replyTo.trim()
+        : undefined;
+
+    const addressedTo =
+      typeof input?.addressedTo === "string" && input.addressedTo.trim() !== ""
+        ? input.addressedTo.trim()
+        : undefined;
+
     const docToInsert: Omit<MongoChatMessageDoc, "_id"> = {
       diagramId,
       authorSessionId,
       authorName,
       role: role || "developer",
       text: trimmedText,
-      ...(Array.isArray(input.mentions) ? { mentions: input.mentions } : {}),
+      ...(mentionsList.length > 0 ? { mentions: mentionsList } : {}),
       ...(input.proposal !== undefined ? { proposal: input.proposal } : {}),
+      ...(replyTo ? { replyTo } : {}),
+      ...(addressedTo ? { addressedTo } : {}),
       createdAt: now,
     };
 
@@ -198,8 +243,10 @@ export const saveMessage = async (
       authorName,
       role: docToInsert.role,
       text: trimmedText,
-      ...(Array.isArray(input.mentions) ? { mentions: input.mentions } : {}),
+      ...(mentionsList.length > 0 ? { mentions: mentionsList } : {}),
       ...(input.proposal !== undefined ? { proposal: input.proposal } : {}),
+      ...(replyTo ? { replyTo } : {}),
+      ...(addressedTo ? { addressedTo } : {}),
       createdAt: now,
     };
   } catch (err: any) {
@@ -262,6 +309,8 @@ export const listMessages = async (
       text: doc.text,
       ...(Array.isArray(doc.mentions) ? { mentions: doc.mentions } : {}),
       ...(doc.proposal !== undefined ? { proposal: doc.proposal } : {}),
+      ...(typeof doc.replyTo === "string" && doc.replyTo ? { replyTo: doc.replyTo } : {}),
+      ...(typeof doc.addressedTo === "string" && doc.addressedTo ? { addressedTo: doc.addressedTo } : {}),
       createdAt: doc.createdAt,
     }));
   } catch (err: any) {

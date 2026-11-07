@@ -364,5 +364,6 @@ export const useTeamChat = ({
     toggleOpen,
     closeChat,
     clearError,
+    diagramId,
   };
 };

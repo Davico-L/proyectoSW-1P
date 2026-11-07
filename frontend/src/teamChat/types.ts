@@ -1,11 +1,15 @@
+export const AI_DISPLAY_NAME = "Codia";
+
 export interface PublicChatMessage {
   id: string;
   diagramId: string;
   authorName: string;
-  role: string;
+  role: "user" | "ai" | "system" | string;
   text: string;
   createdAt: string | Date;
   mentions?: string[];
+  replyTo?: string;
+  addressedTo?: string;
   proposal?: any;
 }
 

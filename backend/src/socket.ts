@@ -4,12 +4,49 @@ import { getDiagramById } from "./services/diagramService";
 import { getSession, sessionExists } from "./services/sessionService";
 import {
   saveMessage,
+  listMessages,
   toPublicChatMessage,
   ChatValidationError,
   ChatUnavailableError,
 } from "./chat/chatRepository";
+import {
+  createAiChatService,
+  AiBusyError,
+  AiUnavailableError,
+} from "./chat/aiChatService";
+import {
+  parseMention,
+  AI_DISPLAY_NAME,
+  AI_MENTION_ALIASES,
+} from "./chat/aiChatHelpers";
+import { chatWithFallback } from "./ai/providers/providerManager";
+import { extractUmlModel } from "./backendGenerator/extractModel";
 
-export const initSocket = (server: HttpServer): Server => {
+const defaultAiChatService = createAiChatService({
+  getDiagramModel: async (diagId: string) => {
+    const diagram = await getDiagramById(diagId);
+    if (!diagram || !diagram.data) return null;
+    return extractUmlModel(diagram.data);
+  },
+  listRecentMessages: async (diagId: string, limit: number) => {
+    const docs = await listMessages(diagId, limit);
+    return docs.map((d) => ({
+      id: d.id,
+      authorName: d.authorName,
+      text: d.text,
+    }));
+  },
+  chat: async (sysPrompt, userContent, options) => {
+    const res = await chatWithFallback(sysPrompt, userContent, options);
+    return res.text;
+  },
+});
+
+export const initSocket = (
+  server: HttpServer,
+  customAiChatService?: ReturnType<typeof createAiChatService>
+): Server => {
+  const aiChatService = customAiChatService || defaultAiChatService;
   const allowedOrigins = [
     "http://localhost:3001",
     "http://localhost:3000",
@@ -134,12 +171,23 @@ export const initSocket = (server: HttpServer): Server => {
           }
 
           // 4. Guardar en socket.data el diagramId, sessionId y username verificado
+          // Mitigación de suplantación: si el nombre de usuario normalizado es "ia" o "codia", asignar "{nombre} (usuario)"
+          const rawUsername = session.username || "";
+          const trimmedUsername = rawUsername.trim();
+          const normalizedUser = trimmedUsername.toLowerCase();
+          let resolvedAuthorName = rawUsername;
+
+          if (normalizedUser === "ia" || normalizedUser === "codia") {
+            const baseName = normalizedUser === "ia" ? "IA" : AI_DISPLAY_NAME;
+            resolvedAuthorName = `${baseName} (usuario)`;
+          }
+
           socket.data.diagramId = diagramId;
           socket.data.sessionId = sessionId;
-          socket.data.authorName = session.username;
+          socket.data.authorName = resolvedAuthorName;
 
           console.log(
-            `[Socket] Socket ${socket.id} unido al chat del diagrama ${diagramId} como '${session.username}'`
+            `[Socket] Socket ${socket.id} unido al chat del diagrama ${diagramId} como '${resolvedAuthorName}'`
           );
 
           if (typeof callback === "function") {
@@ -228,6 +276,114 @@ export const initSocket = (server: HttpServer): Server => {
 
           if (typeof callback === "function") {
             callback({ ok: true });
+          }
+
+          // 6. CU19: Si el mensaje tiene role "user" y contiene mención @ia, procesar respuesta IA en segundo plano
+          if (savedDoc.role === "user") {
+            const mention = parseMention(trimmedText);
+            if (mention.mentioned) {
+              (async () => {
+                const targetDiagramId = diagramId;
+                const triggerMessageId = savedDoc.id;
+                const asker = authorName;
+
+                try {
+                  // a) emitir a la sala "ai-status" con { diagramId, state: "thinking", askerName }
+                  io.to(targetDiagramId).emit("ai-status", {
+                    diagramId: targetDiagramId,
+                    state: "thinking",
+                    askerName: asker,
+                  });
+
+                  // b) llamar a answerInRoom
+                  const result = await aiChatService.answerInRoom({
+                    diagramId: targetDiagramId,
+                    askerName: asker,
+                    askerMessageId: triggerMessageId,
+                    question: mention.question,
+                  });
+
+                  // c) guardar la respuesta con saveMessage con role "ai", authorName AI_DISPLAY_NAME, replyTo y addressedTo, y emitirla como "chat-message"
+                  const aiDoc = await saveMessage({
+                    diagramId: targetDiagramId,
+                    authorSessionId: "ai",
+                    authorName: AI_DISPLAY_NAME,
+                    role: "ai",
+                    text: result.message,
+                    replyTo: triggerMessageId,
+                    addressedTo: asker,
+                  });
+
+                  io.to(targetDiagramId).emit(
+                    "chat-message",
+                    toPublicChatMessage(aiDoc)
+                  );
+                } catch (err: any) {
+                  if (err instanceof AiUnavailableError) {
+                    try {
+                      const errorMsg = `${asker}, no pude responder en este momento debido a un problema con los servicios de IA. Por favor, reintenta tu consulta.`;
+                      const errDoc = await saveMessage({
+                        diagramId: targetDiagramId,
+                        authorSessionId: "ai",
+                        authorName: AI_DISPLAY_NAME,
+                        role: "ai",
+                        text: errorMsg,
+                        replyTo: triggerMessageId,
+                        addressedTo: asker,
+                      });
+                      io.to(targetDiagramId).emit(
+                        "chat-message",
+                        toPublicChatMessage(errDoc)
+                      );
+                    } catch (saveErr) {
+                      console.error(
+                        "[Socket AI] Error al guardar mensaje de error AiUnavailable:",
+                        saveErr
+                      );
+                    }
+                  } else if (err instanceof AiBusyError) {
+                    try {
+                      const busyMsg = `${asker}, estoy atendiendo otras consultas del equipo en este momento. Por favor, reintenta en un momento.`;
+                      const busyDoc = await saveMessage({
+                        diagramId: targetDiagramId,
+                        authorSessionId: "ai",
+                        authorName: AI_DISPLAY_NAME,
+                        role: "ai",
+                        text: busyMsg,
+                        replyTo: triggerMessageId,
+                        addressedTo: asker,
+                      });
+                      io.to(targetDiagramId).emit(
+                        "chat-message",
+                        toPublicChatMessage(busyDoc)
+                      );
+                    } catch (saveErr) {
+                      console.error(
+                        "[Socket AI] Error al guardar mensaje de error AiBusy:",
+                        saveErr
+                      );
+                    }
+                  } else {
+                    console.error(
+                      "[Socket AI] Error inesperado en procesamiento de IA:",
+                      err?.message || err
+                    );
+                  }
+                } finally {
+                  // d) en un finally, emitir "ai-status" con { diagramId, state: "idle", askerName }
+                  io.to(targetDiagramId).emit("ai-status", {
+                    diagramId: targetDiagramId,
+                    state: "idle",
+                    askerName: asker,
+                  });
+                }
+              })().catch((unhandledErr) => {
+                console.error(
+                  "[Socket AI] Error no controlado en worker asíncrono de IA:",
+                  unhandledErr
+                );
+              });
+            }
           }
         } catch (err: any) {
           if (err instanceof ChatValidationError) {

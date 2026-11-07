@@ -57,11 +57,39 @@ describe("Socket.IO Eventos de Chat (chat-join y chat-message)", () => {
             rowCount: 1,
           };
         }
+        if (params?.[0] === "session-ia-impersonator") {
+          return {
+            rows: [
+              {
+                id: "session-ia-impersonator",
+                username: "  Ia  ",
+                created_at: new Date().toISOString(),
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (params?.[0] === "session-codia-impersonator") {
+          return {
+            rows: [
+              {
+                id: "session-codia-impersonator",
+                username: "  Codia  ",
+                created_at: new Date().toISOString(),
+              },
+            ],
+            rowCount: 1,
+          };
+        }
         return { rows: [], rowCount: 0 };
       }
 
       if (queryStr.includes("SELECT 1 FROM sessions WHERE id = $1")) {
-        if (params?.[0] === testSessionId) {
+        if (
+          params?.[0] === testSessionId ||
+          params?.[0] === "session-ia-impersonator" ||
+          params?.[0] === "session-codia-impersonator"
+        ) {
           return { rows: [{ "?column?": 1 }], rowCount: 1 };
         }
         return { rows: [], rowCount: 0 };
@@ -286,5 +314,53 @@ describe("Socket.IO Eventos de Chat (chat-join y chat-message)", () => {
     } finally {
       io.to = originalTo;
     }
+  });
+
+  test("8. chat-join con nombre de usuario 'Ia' asigna authorName 'IA (usuario)' sin rechazar la unión", async () => {
+    const socket = connectSocket("sock-ia-test");
+
+    const diagId = `diag-${Date.now()}`;
+    testDiagramIds.push(diagId);
+    socket.join(diagId);
+
+    await new Promise<void>((resolve) => {
+      socket.emit(
+        "chat-join",
+        { diagramId: diagId, sessionId: "session-ia-impersonator" },
+        (res: any) => {
+          assert.equal(res.ok, true, "La unión NO debe ser rechazada");
+          assert.equal(
+            socket.data.authorName,
+            "IA (usuario)",
+            "El authorName debe transformarse a 'IA (usuario)'"
+          );
+          resolve();
+        }
+      );
+    });
+  });
+
+  test("9. chat-join con nombre de usuario 'Codia' asigna authorName 'Codia (usuario)' sin rechazar la unión", async () => {
+    const socket = connectSocket("sock-codia-test");
+
+    const diagId = `diag-${Date.now()}`;
+    testDiagramIds.push(diagId);
+    socket.join(diagId);
+
+    await new Promise<void>((resolve) => {
+      socket.emit(
+        "chat-join",
+        { diagramId: diagId, sessionId: "session-codia-impersonator" },
+        (res: any) => {
+          assert.equal(res.ok, true, "La unión NO debe ser rechazada");
+          assert.equal(
+            socket.data.authorName,
+            "Codia (usuario)",
+            "El authorName debe transformarse a 'Codia (usuario)'"
+          );
+          resolve();
+        }
+      );
+    });
   });
 });

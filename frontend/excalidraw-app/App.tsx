@@ -2876,6 +2876,7 @@ const ExcalidrawWrapper = ({
           onSendMessage={teamChat.sendMessage}
           onClose={teamChat.closeChat}
           onClearError={teamChat.clearError}
+          diagramId={teamChat.diagramId}
         />
       )}
 
