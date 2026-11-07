@@ -150,3 +150,49 @@ export function trimToLastSentence(text: string): string {
   return trimmed.slice(0, lastIndex + 1);
 }
 
+/**
+ * Quita al inicio del texto (hasta dos veces, en cualquier orden):
+ * - Un saludo del tipo "Hola…", "¡Hola…!", "Buenas…" hasta su punto o signo de cierre
+ *   (. ! ? : \n o fin de texto), con un máximo de 60 caracteres.
+ * - Una presentación del tipo "Soy Codia…" o "Me llamo Codia…" hasta su punto o signo de cierre
+ *   (. ! ? : \n o fin de texto), con un máximo de 100 caracteres.
+ *
+ * Si una frase empieza con "Hola" o similar pero supera la longitud de un saludo corto
+ * (por ejemplo > 60 caracteres antes de su cierre), se conserva intacta como parte del contenido.
+ * Tras el recorte, los espacios iniciales residuales se eliminan sin alterar la primera letra restante.
+ */
+export function stripGreetingPreamble(text: string): string {
+  if (typeof text !== "string" || !text) {
+    return text || "";
+  }
+
+  let current = text.trimStart();
+
+  // Patrón de saludo corto (<= 60 caracteres hasta el signo de cierre, salto de línea o fin)
+  const greetingRegex =
+    /^(?:¡\s*)?(?:hola|buenas(?:\s+(?:tardes|días|dias|noches))?)\b[^\n.!?]{0,55}(?:[.!?:]+|\n|$)\s*/iu;
+
+  // Patrón de presentación corta (<= 100 caracteres hasta el signo de cierre, salto de línea o fin)
+  const presentationRegex =
+    /^(?:soy|me\s+llamo)\s+(?:\*\*)?codia(?:\*\*)?\b[^\n.!?]{0,90}(?:[.!?:]+|\n|$)\s*/iu;
+
+  for (let i = 0; i < 2; i++) {
+    const greetingMatch = current.match(greetingRegex);
+    if (greetingMatch && greetingMatch[0].length <= 60) {
+      current = current.slice(greetingMatch[0].length);
+      continue;
+    }
+
+    const presentationMatch = current.match(presentationRegex);
+    if (presentationMatch && presentationMatch[0].length <= 100) {
+      current = current.slice(presentationMatch[0].length);
+      continue;
+    }
+
+    break;
+  }
+
+  return current;
+}
+
+

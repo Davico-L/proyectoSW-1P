@@ -1,7 +1,10 @@
 import { UmlModel, UmlRelation } from "../backendGenerator/types";
+import { stripGreetingPreamble } from "./aiChatHelpers";
 
 export interface ChatMessageSummary {
   authorName?: string;
+  role?: string;
+  addressedTo?: string;
   text?: string;
 }
 
@@ -145,7 +148,25 @@ export function buildChatContext({
     const last6 = validMessages.slice(-6);
     const lines = last6.map((msg) => {
       const author = (msg.authorName || "Usuario").trim();
-      const rawText = msg.text || "";
+      let rawText = msg.text || "";
+
+      // Si es un mensaje previo de la IA (role === "ai" o author === "Codia")
+      if (msg.role === "ai" || author === "Codia") {
+        // Quitar el prefijo "{addressedTo}, " que el servidor antepone
+        if (
+          msg.addressedTo &&
+          typeof msg.addressedTo === "string" &&
+          msg.addressedTo.trim()
+        ) {
+          const escaped = msg.addressedTo
+            .trim()
+            .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          rawText = rawText.replace(new RegExp(`^${escaped},\\s*`, "i"), "");
+        }
+        // Despojar saludos o presentaciones previas de la IA
+        rawText = stripGreetingPreamble(rawText);
+      }
+
       const truncated =
         rawText.length > 250 ? rawText.slice(0, 250) : rawText;
       return `${author}: ${truncated}`;

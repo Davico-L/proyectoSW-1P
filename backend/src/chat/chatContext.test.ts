@@ -173,5 +173,37 @@ describe("CU19: chatContext", () => {
       assert.match(context, /^Diagrama actual: El diagrama está vacío\./);
       assert.match(context, /\n\nPregunta de Davico: ¿Qué diagramas tenemos\?$/);
     });
+
+    test("mensajes previos de la IA (role 'ai'): quita prefijo '{addressedTo}, ' y despoja saludo/presentación", () => {
+      const recentMessages = [
+        {
+          authorName: "Davico",
+          role: "user",
+          text: "¿Qué es una clase abstracta?",
+        },
+        {
+          authorName: "Codia",
+          role: "ai",
+          addressedTo: "Davico",
+          text: "Davico, ¡Hola! Soy Codia, la desarrolladora senior y mentora del equipo. Una clase abstracta es una clase que no puede instanciarse.",
+        },
+      ];
+
+      const context = buildChatContext({
+        modelCompact: "Cliente(id: Integer)",
+        recentMessages,
+        askerName: "Davico",
+        question: "¿Y cómo se dibuja?",
+      });
+
+      assert.match(context, /Conversación reciente \(solo contexto\):/);
+      // El mensaje de Davico se mantiene normal
+      assert.match(context, /Davico: ¿Qué es una clase abstracta\?/);
+      // El mensaje de Codia NO debe contener "Davico, ", ni "¡Hola!", ni "Soy Codia..."
+      assert.match(context, /Codia: Una clase abstracta es una clase que no puede instanciarse\./);
+      assert.doesNotMatch(context, /Codia: Davico,/);
+      assert.doesNotMatch(context, /¡Hola!/);
+      assert.doesNotMatch(context, /Soy Codia/);
+    });
   });
 });

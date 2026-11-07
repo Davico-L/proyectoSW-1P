@@ -140,9 +140,9 @@ async function main() {
     systemPrompt: string,
     userContent: string,
     options?: any
-  ) => Promise<string> = async (systemPrompt, userContent, options) => {
-    const res = await chatWithFallback(systemPrompt, userContent, options);
-    return res.text;
+  ) => Promise<string> = async (_systemPrompt, _userContent, _options) => {
+    // Simulación controlada para no consumir cuota real de Gemini ni agotar llamadas a Groq
+    return "Para relacionar Venta con Producto debes usar una asociación donde una Venta puede tener varios Productos.";
   };
 
   const controllableAiChatService = createAiChatService({
@@ -156,6 +156,8 @@ async function main() {
       return docs.map((d) => ({
         id: d.id,
         authorName: d.authorName,
+        role: d.role,
+        addressedTo: d.addressedTo,
         text: d.text,
       }));
     },

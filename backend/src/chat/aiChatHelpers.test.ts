@@ -4,6 +4,7 @@ import {
   parseMention,
   ensureAddressedByName,
   trimToLastSentence,
+  stripGreetingPreamble,
   AI_DISPLAY_NAME,
   AI_MENTION_ALIASES,
 } from "./aiChatHelpers";
@@ -234,6 +235,66 @@ describe("CU19: aiChatHelpers", () => {
     test("cadena vacía o solo espacios: devuelve vacío", () => {
       assert.equal(trimToLastSentence(""), "");
       assert.equal(trimToLastSentence("   "), "");
+    });
+  });
+
+  describe("stripGreetingPreamble", () => {
+    test("saludo solo: quita '¡Hola, David Luna!' y conserva el resto", () => {
+      const input = "¡Hola, David Luna! Una clase abstracta es una plantilla base.";
+      assert.equal(stripGreetingPreamble(input), "Una clase abstracta es una plantilla base.");
+    });
+
+    test("saludo solo con 'Buenas tardes': quita el saludo", () => {
+      const input = "Buenas tardes. Una asociación conecta dos clases.";
+      assert.equal(stripGreetingPreamble(input), "Una asociación conecta dos clases.");
+    });
+
+    test("presentación sola: quita 'Soy Codia...' y conserva el resto", () => {
+      const input = "Soy Codia, la desarrolladora senior y mentora del equipo. Una interfaz define métodos.";
+      assert.equal(stripGreetingPreamble(input), "Una interfaz define métodos.");
+    });
+
+    test("presentación sola con 'Me llamo Codia': quita la presentación", () => {
+      const input = "Me llamo Codia. Los atributos derivados llevan barra diagonal.";
+      assert.equal(stripGreetingPreamble(input), "Los atributos derivados llevan barra diagonal.");
+    });
+
+    test("ambos (saludo y luego presentación): quita ambos preámbulos", () => {
+      const input = "Hola, David. Soy Codia. Una clase abstracta no se puede instanciar.";
+      assert.equal(stripGreetingPreamble(input), "Una clase abstracta no se puede instanciar.");
+    });
+
+    test("ambos en orden inverso (presentación y luego saludo): quita ambos preámbulos", () => {
+      const input = "Soy Codia. ¡Hola! La agregación usa rombo vacío.";
+      assert.equal(stripGreetingPreamble(input), "La agregación usa rombo vacío.");
+    });
+
+    test("saludo con nombre y negrita: 'Hola, **David Luna**. Soy Codia…'", () => {
+      const input = "Hola, **David Luna**. Soy Codia, la desarrolladora senior y mentora del equipo. La composición tiene ciclo de vida dependiente.";
+      assert.equal(stripGreetingPreamble(input), "La composición tiene ciclo de vida dependiente.");
+    });
+
+    test("texto sin saludo ni presentación: no cambia en absoluto", () => {
+      const input = "Una clase abstracta no puede ser instanciada directamente.";
+      assert.equal(stripGreetingPreamble(input), input);
+    });
+
+    test("frase que empieza con 'Hola' pero es parte del contenido y excede saludo corto: se conserva intacta", () => {
+      const input = "Hola a todas las personas interesadas en aprender arquitectura de software y patrones de diseño en sistemas distribuidos que quieran comprender este concepto.";
+      assert.equal(stripGreetingPreamble(input), input);
+    });
+
+    test("preserva la primera letra tras el recorte sin modificar mayúsculas/minúsculas", () => {
+      const input = "Hola, Ana. Una clase abstracta sirve de base.";
+      const stripped = stripGreetingPreamble(input);
+      assert.equal(stripped[0], "U");
+      assert.equal(stripped, "Una clase abstracta sirve de base.");
+    });
+
+    test("manejo seguro de entradas vacías o no válidas", () => {
+      assert.equal(stripGreetingPreamble(""), "");
+      assert.equal(stripGreetingPreamble(null as any), "");
+      assert.equal(stripGreetingPreamble(undefined as any), "");
     });
   });
 });

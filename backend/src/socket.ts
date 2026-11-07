@@ -33,6 +33,8 @@ const defaultAiChatService = createAiChatService({
     return docs.map((d) => ({
       id: d.id,
       authorName: d.authorName,
+      role: d.role,
+      addressedTo: d.addressedTo,
       text: d.text,
     }));
   },

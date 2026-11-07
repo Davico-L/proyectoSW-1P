@@ -1,6 +1,10 @@
 import { UmlModel } from "../backendGenerator/types";
 import { formatModelCompact, buildChatContext } from "./chatContext";
-import { ensureAddressedByName, trimToLastSentence } from "./aiChatHelpers";
+import {
+  ensureAddressedByName,
+  trimToLastSentence,
+  stripGreetingPreamble,
+} from "./aiChatHelpers";
 
 export class AiBusyError extends Error {
   constructor(
@@ -23,11 +27,14 @@ export class AiUnavailableError extends Error {
 }
 
 export const TEAM_AI_SYSTEM_PROMPT =
-  "Te llamas Codia. Eres la desarrolladora senior y mentora del equipo. " +
-  "Si te preguntan quién eres, te presentas como Codia, la desarrolladora senior y mentora del equipo. " +
+  "Tu nombre es Codia. Eres la desarrolladora senior y mentora del equipo. " +
   "Respondes en español. " +
-  "Te diriges a quien pregunta por su nombre. " +
-  "Longitud: unas 120 palabras, salvo que pidan más detalle. " +
+  "No saludes (nada de 'Hola' ni '¡Hola!') ni te presentes; empieza directamente con la respuesta. " +
+  "No escribas el nombre de quien pregunta: el sistema lo antepone. " +
+  "Solo di tu nombre o tu rol si te preguntan explícitamente quién eres. " +
+  "Ejemplo de inicio correcto: 'Una clase abstracta es…'. " +
+  "Ejemplo incorrecto: 'Hola, Ana. Soy Codia, la desarrolladora senior…'. " +
+  "Longitud: máximo unas 120 palabras, sin listas largas, salvo que pidan más detalle. " +
   "Formato: solo texto plano; se permite únicamente **negrita** puntual y `código en línea`; sin encabezados ni tablas; bloques de código con ``` SOLO si la persona pide código explícitamente. " +
   "No uses cursiva con asterisco simple. Para énfasis usa solo **negrita**. " +
   "No asumas lenguaje ni tecnología (no des código Java, SQL ni JPA salvo que lo pidan); responde en términos de UML y del diagrama del equipo. " +
@@ -44,7 +51,15 @@ export interface AiChatServiceDeps {
   listRecentMessages: (
     diagramId: string,
     limit: number
-  ) => Promise<Array<{ id: string; authorName: string; text: string }>>;
+  ) => Promise<
+    Array<{
+      id: string;
+      authorName: string;
+      text: string;
+      role?: string;
+      addressedTo?: string;
+    }>
+  >;
   chat: (
     systemPrompt: string,
     userContent: string,
@@ -133,9 +148,7 @@ export function createAiChatService(deps: AiChatServiceDeps) {
           // Invocar chat
           let rawReply = "";
           try {
-            rawReply = await deps.chat(TEAM_AI_SYSTEM_PROMPT, userContent, {
-              maxTokens: 400,
-            });
+            rawReply = await deps.chat(TEAM_AI_SYSTEM_PROMPT, userContent);
           } catch (err: any) {
             throw new AiUnavailableError(
               err?.message || "Error al comunicarse con el proveedor de IA."
@@ -149,8 +162,19 @@ export function createAiChatService(deps: AiChatServiceDeps) {
           }
 
           // Procesar salida en orden estricto:
+          // 0. stripGreetingPreamble (salvo que la pregunta pida explícitamente quién es / cómo se llama / presentarse)
+          const isSelfIntroQuestion =
+            /(?:qui[eé]n\s+eres|c[oó]mo\s+te\s+llamas|pres[eé]ntate)/i.test(
+              rawQuestion
+            );
+
+          let processed = rawReply;
+          if (!isSelfIntroQuestion) {
+            processed = stripGreetingPreamble(processed);
+          }
+
           // 1. trimToLastSentence
-          let processed = trimToLastSentence(rawReply);
+          processed = trimToLastSentence(processed);
           // 2. ensureAddressedByName
           processed = ensureAddressedByName(processed, cleanAsker);
           // 3. tope de 3000 caracteres

@@ -62,9 +62,11 @@ describe("CU19: aiChatService", () => {
     });
 
     assert.equal(capturedSystem, TEAM_AI_SYSTEM_PROMPT);
-    assert.match(TEAM_AI_SYSTEM_PROMPT, /Te llamas Codia/);
+    assert.match(TEAM_AI_SYSTEM_PROMPT, /Tu nombre es Codia/);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /desarrolladora senior y mentora del equipo/);
-    assert.match(TEAM_AI_SYSTEM_PROMPT, /unas 120 palabras/i);
+    assert.match(TEAM_AI_SYSTEM_PROMPT, /No saludes \(nada de 'Hola' ni '¡Hola!'\) ni te presentes/);
+    assert.match(TEAM_AI_SYSTEM_PROMPT, /No escribas el nombre de quien pregunta/);
+    assert.match(TEAM_AI_SYSTEM_PROMPT, /máximo unas 120 palabras/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /solo texto plano/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /sin encabezados ni tablas/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /No uses cursiva con asterisco simple/i);
@@ -79,7 +81,7 @@ describe("CU19: aiChatService", () => {
     assert.match(TEAM_AI_SYSTEM_PROMPT, /composición se dibuja con rombo relleno/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /agregación se dibuja con rombo vacío/i);
     assert.match(TEAM_AI_SYSTEM_PROMPT, /multiplicidades se escriben 1, 0\.\.1, \* y 1\.\.\*/i);
-    assert.deepEqual(capturedOptions, { maxTokens: 400 });
+    assert.equal(capturedOptions, undefined);
 
     // Excluye el mensaje actual (m2) del historial
     assert.match(capturedUser, /Ana: Hola equipo/);
@@ -152,7 +154,7 @@ describe("CU19: aiChatService", () => {
       getDiagramModel: async () => sampleModel,
       listRecentMessages: async () => [],
       chat: async () =>
-        "Hola Carlos, el modelo está bien. La clase Pedido contiene un atributo id que se relac",
+        "El modelo está bien. La clase Pedido contiene un atributo id que se relac",
     });
 
     const result = await service.answerInRoom({
@@ -163,7 +165,7 @@ describe("CU19: aiChatService", () => {
     });
 
     // Se recorta el fragmento cortado "La clase Pedido contiene..."
-    assert.equal(result.message, "Hola Carlos, el modelo está bien.");
+    assert.equal(result.message, "Carlos, el modelo está bien.");
   });
 
   test("5. Respuesta de más de 3000 caracteres: se trunca al tope", async () => {
@@ -344,5 +346,47 @@ describe("CU19: aiChatService", () => {
     });
 
     assert.equal(result.message, "Ana, UML es el lenguaje estándar de modelado.");
+  });
+
+  test("12. stripGreetingPreamble despoja saludo y presentación en preguntas normales", async () => {
+    const service = createAiChatService({
+      getDiagramModel: async () => sampleModel,
+      listRecentMessages: async () => [],
+      chat: async () =>
+        "Hola, **Ana**. Soy Codia, la desarrolladora senior y mentora del equipo. Una clase abstracta es una plantilla.",
+    });
+
+    const result = await service.answerInRoom({
+      diagramId: "d1",
+      askerName: "Ana",
+      askerMessageId: "m1",
+      question: "¿Qué es una clase abstracta?",
+    });
+
+    assert.equal(
+      result.message,
+      "Ana, una clase abstracta es una plantilla."
+    );
+  });
+
+  test("13. Excepción cuando la pregunta es '¿quién eres?': conserva la presentación de Codia", async () => {
+    const service = createAiChatService({
+      getDiagramModel: async () => sampleModel,
+      listRecentMessages: async () => [],
+      chat: async () =>
+        "Soy Codia, la desarrolladora senior y mentora del equipo. Estoy aquí para colaborar.",
+    });
+
+    const result = await service.answerInRoom({
+      diagramId: "d1",
+      askerName: "Ana",
+      askerMessageId: "m1",
+      question: "¿Quién eres?",
+    });
+
+    assert.equal(
+      result.message,
+      "Ana, soy Codia, la desarrolladora senior y mentora del equipo. Estoy aquí para colaborar."
+    );
   });
 });

@@ -1,7 +1,15 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "http";
+import path from "path";
 import { AddressInfo } from "net";
+import dotenv from "dotenv";
+dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "backend/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+
 import { app } from "../../app";
 import { pool } from "../../db";
 import {
@@ -14,6 +22,8 @@ import {
 } from "./providerManager";
 import { getProvider, registerProvider } from "./index";
 import { ModelProvider, checkTruncatedResponse } from "./types";
+import { groqProvider } from "./groqProvider";
+import { localProvider, setLocalConfig, clearLocalConfig } from "./localProvider";
 
 describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => {
   let server: http.Server;
@@ -546,6 +556,70 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
       assert.equal(result.provider, "gemini");
       assert.equal(result.fallback, false);
       assert.equal(result.text, normalResponse);
+    });
+
+    test("GroqProvider chatReply envía max_tokens: 700 y reasoning_effort: 'low' por defecto", async () => {
+      const originalFetch = globalThis.fetch;
+      const originalApiKey = process.env.GROQ_API_KEY;
+      process.env.GROQ_API_KEY = "dummy-groq-key";
+
+      let capturedBody: any = null;
+      (globalThis as any).fetch = async (_url: string, init: any) => {
+        capturedBody = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [
+              {
+                message: { content: "Una clase abstracta es una clase base." },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        };
+      };
+
+      try {
+        const res = await groqProvider.chatReply("sys prompt", "user query");
+        assert.equal(capturedBody.max_tokens, 700);
+        assert.equal(capturedBody.reasoning_effort, "low");
+        assert.equal(res, "Una clase abstracta es una clase base.");
+      } finally {
+        globalThis.fetch = originalFetch;
+        process.env.GROQ_API_KEY = originalApiKey;
+      }
+    });
+
+    test("LocalProvider chatReply envía max_tokens: 550 por defecto", async () => {
+      const originalFetch = globalThis.fetch;
+      setLocalConfig({ url: "http://localhost:1234", model: "test-model" });
+
+      let capturedBody: any = null;
+      (globalThis as any).fetch = async (_url: string, init: any) => {
+        capturedBody = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [
+              {
+                message: { content: "Respuesta local simulada." },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        };
+      };
+
+      try {
+        const res = await localProvider.chatReply("sys prompt", "user query");
+        assert.equal(capturedBody.max_tokens, 550);
+        assert.equal(res, "Respuesta local simulada.");
+      } finally {
+        globalThis.fetch = originalFetch;
+        clearLocalConfig();
+      }
     });
   });
 });

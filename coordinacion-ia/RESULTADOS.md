@@ -1158,6 +1158,44 @@ Este documento recopila los resultados, entregables verificados y métricas de a
   - `npm --prefix backend test`: 99/99 pruebas aprobadas (18 suites completas).
   - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados, verificando la emisión de la línea de métricas de `[AI-CHAT]` en tiempo real.
 
+---
+
+### [RES-086] Supresión de Preámbulo de Saludo/Presentación y Calibración de Tokens por Proveedor en CU19 (Backend)
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-086
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatHelpers.ts` (**modificado**):
+    - Implementada y exportada la función pura `stripGreetingPreamble(text: string): string`, que quita al inicio del texto (hasta 2 veces, en cualquier orden) saludos cortos (`Hola…`, `¡Hola…!`, `Buenas…` hasta su signo de cierre o salto de línea, máx. 60 caracteres) y presentaciones (`Soy Codia…`, `Me llamo Codia…` hasta su punto o cierre, máx. 100 caracteres) sin alterar el resto ni la mayúscula/minúscula de la primera letra resultante. Preserva frases largas que empiezan con "Hola" como parte del contenido.
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - `TEAM_AI_SYSTEM_PROMPT`: sustituidas frases ambiguas de presentación por la regla estricta: *"Tu nombre es Codia. No saludes (nada de 'Hola' ni '¡Hola!') ni te presentes; empieza directamente con la respuesta. No escribas el nombre de quien pregunta: el sistema lo antepone. Solo di tu nombre o tu rol si te preguntan explícitamente quién eres. Ejemplo de inicio correcto: 'Una clase abstracta es…'. Ejemplo incorrecto: 'Hola, Ana. Soy Codia, la desarrolladora senior…'".* Reforzada brevedad con *"Longitud: máximo unas 120 palabras, sin listas largas, salvo que pidan más detalle."*
+    - `answerInRoom`: aplica `stripGreetingPreamble` a la respuesta del modelo antes de `trimToLastSentence` y `ensureAddressedByName`, salvo que la pregunta pida explícitamente presentarse (`qui[eé]n eres`, `c[oó]mo te llamas`, `pres[eé]ntate`).
+    - Deja de imponer `maxTokens: 400`, delegando el límite a los valores por defecto de cada proveedor.
+  - `backend/src/chat/chatContext.ts` (**modificado**):
+    - `ChatMessageSummary`: ampliado con `role?: string` y `addressedTo?: string`.
+    - `buildChatContext`: para respuestas previas de la IA (`role === "ai"` o `author === "Codia"`), retira el prefijo `{addressedTo}, ` y aplica `stripGreetingPreamble` antes de integrarlas al historial, evitando que el modelo aprenda y replique el patrón en contexto.
+  - `backend/src/socket.ts` (**modificado**):
+    - `listRecentMessages`: mapea y entrega `role: d.role` y `addressedTo: d.addressedTo` desde MongoDB.
+  - `backend/src/ai/providers/groqProvider.ts` (**modificado**):
+    - `DEFAULT_MAX_TOKENS`: elevado a 700.
+    - Envía `reasoning_effort: "low"` en el payload JSON hacia `https://api.groq.com/openai/v1/chat/completions` (verificado con respuesta 200 OK y reducción drástica de tokens de razonamiento).
+  - `backend/src/ai/providers/localProvider.ts` (**modificado**):
+    - `DEFAULT_MAX_TOKENS`: elevado a 550.
+  - `backend/src/ai/providers/geminiProvider.ts` (**intacto**):
+    - Conserva `DEFAULT_MAX_TOKENS = 400` y `thinkingBudget: 0`.
+  - `backend/src/scripts/testTeamChatAi.ts` (**modificado**):
+    - Simulación controlada sin invocar API real de Gemini ni agotar llamadas a Groq; mapeo de `role` y `addressedTo`.
+  - Pruebas unitarias actualizadas y ampliadas:
+    - `backend/src/chat/aiChatHelpers.test.ts`: suite completa de 11 casos para `stripGreetingPreamble` (saludo solo, presentación sola, ambos órdenes, negrita, no saludo, frase larga que inicia con "Hola", preservación de primera letra).
+    - `backend/src/chat/aiChatService.test.ts`: validación del nuevo prompt, opciones sin `maxTokens: 400`, stripping en preguntas normales y excepción en "¿quién eres?".
+    - `backend/src/chat/chatContext.test.ts`: validación de limpieza de `{addressedTo}, ` y preámbulos en respuestas de la IA.
+    - `backend/src/ai/providers/aiProviders.test.ts`: aserciones de `max_tokens: 700` y `reasoning_effort: "low"` en Groq, y `max_tokens: 550` en Local.
+- **Archivos NO Modificados**:
+  - Frontend, lienzo, sincronización, `editDiagramByInstruction` y servicios de edición de diagramas se mantuvieron 100% intactos.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 115/115 pruebas unitarias aprobadas (19 suites completas).
+  - `npx tsx backend/src/scripts/testTeamChatAi.ts`: 7/7 escenarios de integración aprobados con simulación (cero consumo de cuota de Gemini).
+
 
 
 

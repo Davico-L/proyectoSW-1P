@@ -8,7 +8,7 @@ import { editDiagramByInstructionGroq } from "../../services/groq";
 
 const GROQ_CHAT_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_CHAT_MODEL = "openai/gpt-oss-20b";
-const DEFAULT_MAX_TOKENS = 400;
+const DEFAULT_MAX_TOKENS = 700;
 
 export class GroqProvider implements ModelProvider {
   readonly id: ProviderId = "groq";
@@ -56,6 +56,7 @@ export class GroqProvider implements ModelProvider {
             { role: "user", content: userContent },
           ],
           max_tokens: maxTokens,
+          reasoning_effort: "low",
         }),
         signal: controller.signal,
       });

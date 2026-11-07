@@ -6,6 +6,21 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-086
+- **Nombre**: Supresión de preámbulo de saludo/presentación y calibración de tokens por proveedor en CU19 (Backend)
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `TEAM_AI_SYSTEM_PROMPT` (`aiChatService.ts`), sustituir frases ambiguas de presentación por directriz estricta ("Tu nombre es Codia. No saludes (nada de 'Hola' ni '¡Hola!') ni te presentes; empieza directamente con la respuesta. No escribas el nombre de quien pregunta: el sistema lo antepone. Solo di tu nombre o tu rol si te preguntan explícitamente quién eres...") y reforzar brevedad (máx ~120 palabras, sin listas largas);
+  (2) Implementar función pura `stripGreetingPreamble(text)` en `aiChatHelpers.ts` para despojar saludos y presentaciones iniciales manteniendo la primera letra;
+  (3) Aplicar `stripGreetingPreamble` en `answerInRoom` antes de `trimToLastSentence` y `ensureAddressedByName` (salvo preguntas que pidan explícitamente presentarse), y en `buildChatContext` sobre respuestas previas de la IA retirando además el prefijo `{addressedTo}, `;
+  (4) Calibrar tokens por defecto en cada proveedor: Gemini 400 (thinkingBudget 0), Groq 700 con `reasoning_effort: "low"` en `openai/gpt-oss-20b` (verificado con llamada de prueba), Local 550; en `aiChatService.ts` dejar de imponer 400;
+  (5) Pruebas unitarias para `stripGreetingPreamble`, excepción de "¿quién eres?" y limpieza de historial en tests; validar con pruebas (sin Gemini real, máx 10 llamadas reales a Groq), `typecheck` y `testTeamChatAi`.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-085
 - **Nombre**: Contexto conversacional estricto, rotulación y métricas de latencia de fallback en CU19 (Backend)
 - **Fecha de Inicio**: 2026-11-07

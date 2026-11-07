@@ -366,7 +366,7 @@ export class LocalProvider implements ModelProvider {
 
     const config = _localConfig!;
     const timeoutMs = parseInt(process.env.LOCAL_AI_TIMEOUT_MS || "", 10) || 45000;
-    const maxTokens = options?.maxTokens ?? 400;
+    const maxTokens = options?.maxTokens ?? 550;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
