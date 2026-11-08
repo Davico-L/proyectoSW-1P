@@ -1300,6 +1300,33 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Notas y Observaciones**:
   - No se modificó ningún archivo prohibido (`applyAiOperations.ts`, `operationValidator.ts`, `diagramRoutes.ts`, ruta `ai-edit`, lienzo, UC7/8/9/17).
 
+### [RES-091] Correcciones de CU20 por fallos del modelo local: conversión preventiva createClass->updateClass y tratamiento de noChanges
+- **Fecha**: 2026-11-07
+- **Tarea Asociada**: TSK-091
+- **Entregables Producidos**:
+  - `backend/src/chat/modificationHelpers.ts` (**modificado**):
+    - `normalizeClassName(name: unknown): string`: función pura que normaliza cadenas (minúsculas, diacríticos removidos con NFD, espacios colapsados y recortados).
+    - `convertExistingCreateToUpdate(operations, existingClasses)`: función pura que convierte operaciones `createClass` en `updateClass` cuando `className` coincide con una clase existente en el diagrama, conservando atributos y métodos y usando el nombre real de la clase en el diagrama. Excepción: si hubo un `deleteClass` previo de esa misma clase en el lote, se mantiene como `createClass`.
+  - `backend/src/chat/modificationHelpers.test.ts` (**modificado**):
+    - 8 pruebas agregadas para `convertExistingCreateToUpdate` y `normalizeClassName` cubriendo: conservación de atributos/métodos, insensibilidad a tildes/capitalización, clase inexistente sin cambios, deleteClass previo sin cambios, deleteClass posterior permitiendo conversión previa, salida esperada en `summarizeOperations` ("actualicé la clase X") y manejo defensivo. Total suite: 85 pruebas.
+  - `backend/src/chat/diagramAiEditService.ts` (**modificado**):
+    - Añadido `convertExistingCreateToUpdate` a `DiagramAiEditDeps` y `defaultDeps`.
+    - Antes de llamar a `validateAndResolveOperations`, se aplica `convertExistingCreateToUpdate(result.operations, classes)` sobre las operaciones recibidas del proveedor IA.
+  - `backend/src/chat/diagramAiEditService.test.ts` (**modificado**):
+    - Prueba 9 agregada verificando la conversión e integración de `createClass` a `updateClass` antes de la validación. Total suite: 9 pruebas.
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - En la rama de modificación, cuando `editResult.status === "noChanges"`:
+      - Si el texto original NO contiene signos de interrogación (`?` o `¿`), responde directamente con mensaje natural en primera persona pidiendo reformular o ser más específico con el nombre de la clase o atributo (`kind: "answer"`, `operations: []`), sin invocar `chatReply` ni consumir cuota.
+      - Si contiene `?` o `¿`, mantiene el comportamiento anterior derivando al camino de consulta con `chatReply`.
+  - `backend/src/chat/aiChatServiceCu20.test.ts` (**modificado**):
+    - Pruebas 6a y 6b añadidas validando ambos caminos de `noChanges` (sin `?` y con `?`). Total suite: 12 pruebas.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores en TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 225/225 pruebas en verde (11 suites del backend).
+- **Notas y Observaciones**:
+  - Cero modificaciones a UC7, `applyAiOperations.ts`, `operationValidator.ts`, `diagramRoutes.ts`, ruta `ai-edit` ni archivos de proveedores.
+
+
 
 
 

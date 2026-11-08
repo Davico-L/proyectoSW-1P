@@ -6,6 +6,8 @@ import {
   summarizeOperations,
   checkOperationLimit,
   detectUnsupportedAttributeRequest,
+  normalizeClassName,
+  convertExistingCreateToUpdate,
   MAX_OPERATIONS,
 } from "./modificationHelpers";
 
@@ -812,6 +814,134 @@ describe("CU20: modificationHelpers", () => {
     test("retorna null ante texto vacío o solo espacios", () => {
       assert.equal(detectUnsupportedAttributeRequest(""), null);
       assert.equal(detectUnsupportedAttributeRequest("   "), null);
+    });
+  });
+
+  describe("convertExistingCreateToUpdate", () => {
+    const existingClasses = [
+      { className: "Cliente" },
+      { className: "Dirección" },
+      { className: "OrdenCompra" },
+    ];
+
+    test("1. createClass de clase existente con atributo nuevo se convierte y conserva atributos y métodos", () => {
+      const ops = [
+        {
+          action: "createClass",
+          className: "Cliente",
+          attributes: [{ name: "email", type: "String", visibility: "public" }],
+          methods: [{ name: "activar", returnType: "Boolean", visibility: "public" }],
+        },
+      ];
+
+      const converted = convertExistingCreateToUpdate(ops, existingClasses);
+      assert.equal(converted.length, 1);
+      assert.equal(converted[0].action, "updateClass");
+      assert.equal(converted[0].className, "Cliente");
+      assert.deepEqual(converted[0].attributes, [
+        { name: "email", type: "String", visibility: "public" },
+      ]);
+      assert.deepEqual(converted[0].methods, [
+        { name: "activar", returnType: "Boolean", visibility: "public" },
+      ]);
+    });
+
+    test("2. con nombre en otra capitalización y con tilde distinta también se convierte con el nombre real", () => {
+      const ops = [
+        {
+          action: "createClass",
+          className: "  DIRECCION  ",
+          attributes: [{ name: "calle", type: "String", visibility: "public" }],
+          methods: [],
+        },
+      ];
+
+      const converted = convertExistingCreateToUpdate(ops, existingClasses);
+      assert.equal(converted.length, 1);
+      assert.equal(converted[0].action, "updateClass");
+      assert.equal(converted[0].className, "Dirección");
+      assert.deepEqual(converted[0].attributes, [
+        { name: "calle", type: "String", visibility: "public" },
+      ]);
+      assert.deepEqual(converted[0].methods, []);
+    });
+
+    test("3. createClass de clase inexistente no cambia", () => {
+      const ops = [
+        {
+          action: "createClass",
+          className: "Factura",
+          attributes: [{ name: "total", type: "Double", visibility: "public" }],
+          methods: [],
+        },
+      ];
+
+      const converted = convertExistingCreateToUpdate(ops, existingClasses);
+      assert.equal(converted.length, 1);
+      assert.equal(converted[0].action, "createClass");
+      assert.equal(converted[0].className, "Factura");
+    });
+
+    test("4. el caso del deleteClass previo en el mismo lote no cambia (se mantiene createClass)", () => {
+      const ops = [
+        { action: "deleteClass", className: "cliente" },
+        {
+          action: "createClass",
+          className: "Cliente",
+          attributes: [{ name: "id", type: "Integer" }],
+          methods: [],
+        },
+      ];
+
+      const converted = convertExistingCreateToUpdate(ops, existingClasses);
+      assert.equal(converted.length, 2);
+      assert.equal(converted[0].action, "deleteClass");
+      assert.equal(converted[1].action, "createClass");
+      assert.equal(converted[1].className, "Cliente");
+    });
+
+    test("5. deleteClass posterior en el mismo lote sí permite la conversión previa de createClass", () => {
+      const ops = [
+        {
+          action: "createClass",
+          className: "Cliente",
+          attributes: [{ name: "email", type: "String" }],
+        },
+        { action: "deleteClass", className: "Cliente" },
+      ];
+
+      const converted = convertExistingCreateToUpdate(ops, existingClasses);
+      assert.equal(converted.length, 2);
+      assert.equal(converted[0].action, "updateClass");
+      assert.equal(converted[1].action, "deleteClass");
+    });
+
+    test("6. y el resumen final de summarizeOperations dice 'actualicé la clase X'", () => {
+      const ops = [
+        {
+          action: "createClass",
+          className: "cliente",
+          attributes: [{ name: "telefono", type: "String" }],
+        },
+      ];
+
+      const converted = convertExistingCreateToUpdate(ops, existingClasses);
+      const summary = summarizeOperations(converted);
+      assert.match(summary, /actualicé la clase Cliente/);
+    });
+
+    test("7. normalizeClassName normaliza mayúsculas, tildes y espacios", () => {
+      assert.equal(normalizeClassName("  DIRECCIÓN  "), "direccion");
+      assert.equal(normalizeClassName("Órden de Compra"), "orden de compra");
+      assert.equal(normalizeClassName(null), "");
+      assert.equal(normalizeClassName(""), "");
+    });
+
+    test("8. manejo defensivo con operaciones no array o vacías", () => {
+      assert.deepEqual(convertExistingCreateToUpdate([], existingClasses), []);
+      assert.deepEqual(convertExistingCreateToUpdate(null as any, existingClasses), []);
+      const sample = [{ action: "createClass", className: "X" }];
+      assert.deepEqual(convertExistingCreateToUpdate(sample, []), sample);
     });
   });
 });

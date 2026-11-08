@@ -6,6 +6,20 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-091
+- **Nombre**: Correcciones de CU20 por fallos del modelo local: conversión preventiva createClass->updateClass y tratamiento de noChanges
+- **Fecha de Inicio**: 2026-11-07
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `diagramAiEditService.ts` / `modificationHelpers.ts`: convertir `createClass` en `updateClass` antes de validar cuando `className` coincida (insensible a mayúsculas, tildes y espacios) con una clase existente en el diagrama, conservando atributos y métodos y usando el nombre real de la clase en el diagrama. Excepción: si hubo un `deleteClass` previo de esa misma clase en el lote, mantener como `createClass`.
+  (2) En `aiChatService.ts`: en la rama `noChanges` de modificación, si el texto del usuario NO contiene signos de interrogación (`?` o `¿`), responder directamente con mensaje natural en primera persona pidiendo reformular o especificar el nombre de clase/atributo, sin invocar `chatReply` ni consumir cuota de chat. Si contiene `?` o `¿`, mantener fallback a `chatReply`.
+  (3) Pruebas en `modificationHelpers.test.ts`, `diagramAiEditService.test.ts` y `aiChatServiceCu20.test.ts`.
+  (4) Validación con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-090
 - **Nombre**: Corrección de CU20: Detección preventiva de pedidos no soportados por UC7 (eliminación y renombrado de atributos/métodos)
 - **Fecha de Inicio**: 2026-11-07

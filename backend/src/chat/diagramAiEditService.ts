@@ -10,6 +10,7 @@ import { validateAndResolveOperations } from "../services/operationValidator";
 import {
   checkOperationLimit,
   detectUnsupportedAttributeRequest,
+  convertExistingCreateToUpdate,
 } from "./modificationHelpers";
 import { ProviderId } from "../ai/providers/types";
 
@@ -25,6 +26,7 @@ export interface DiagramAiEditDeps {
     classes: any[]
   ) => { validOperations: any[]; warnings: string[] };
   detectUnsupportedAttributeRequest?: typeof detectUnsupportedAttributeRequest;
+  convertExistingCreateToUpdate?: typeof convertExistingCreateToUpdate;
 }
 
 const defaultDeps: Required<DiagramAiEditDeps> = {
@@ -33,6 +35,7 @@ const defaultDeps: Required<DiagramAiEditDeps> = {
   editWithFallback,
   validateAndResolveOperations,
   detectUnsupportedAttributeRequest,
+  convertExistingCreateToUpdate,
 };
 
 export interface RequestDiagramEditParams {
@@ -161,8 +164,14 @@ export async function requestDiagramEdit(
     };
   }
 
-  // 8. Validar y resolver operaciones contra las clases existentes
-  const { validOperations, warnings } = validate(result.operations, classes);
+  // 8. Corrección 1: createClass sobre clase existente -> convertir a updateClass antes de validar
+  const convertOps =
+    deps.convertExistingCreateToUpdate ??
+    defaultDeps.convertExistingCreateToUpdate;
+  const operationsToValidate = convertOps(result.operations, classes);
+
+  // 9. Validar y resolver operaciones contra las clases existentes
+  const { validOperations, warnings } = validate(operationsToValidate, classes);
 
   if (validOperations.length > 0) {
     return {

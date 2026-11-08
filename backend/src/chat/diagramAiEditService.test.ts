@@ -304,4 +304,51 @@ describe("CU20: diagramAiEditService", () => {
       );
     }
   });
+
+  test("9. createClass de clase existente se convierte a updateClass antes de validar", async () => {
+    let validatedOps: any[] = [];
+
+    const deps = {
+      getDiagramById: async () => sampleDiagram,
+      extractUmlModel: () => sampleModel,
+      editWithFallback: async () => ({
+        operations: [
+          {
+            action: "createClass",
+            className: "cliente",
+            attributes: [{ name: "email", type: "String", visibility: "public" }],
+            methods: [],
+          },
+        ],
+        provider: "groq" as const,
+        fallback: false,
+      }),
+      validateAndResolveOperations: (ops: any[], classes: any[]) => {
+        validatedOps = ops;
+        // Simular lo que hace el validador real:
+        const found = classes.find((c: any) => c.className === ops[0].className);
+        return {
+          validOperations: [{ ...ops[0], classId: found.id }],
+          warnings: [],
+        };
+      },
+    };
+
+    const result = await requestDiagramEdit(
+      { diagramId: "diag-1", instruction: "agrega el email a Cliente" },
+      deps
+    );
+
+    assert.equal(result.status, "ready");
+    assert.equal(validatedOps.length, 1);
+    assert.equal(validatedOps[0].action, "updateClass");
+    assert.equal(validatedOps[0].className, "Cliente");
+    if (result.status === "ready") {
+      assert.equal(result.validOperations.length, 1);
+      assert.equal(result.validOperations[0].action, "updateClass");
+      assert.equal(result.validOperations[0].className, "Cliente");
+      assert.equal(result.validOperations[0].classId, "c-1");
+      assert.deepEqual(result.warnings, []);
+    }
+  });
 });

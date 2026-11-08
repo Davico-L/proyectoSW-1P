@@ -227,7 +227,24 @@ export function createAiChatService(deps: AiChatServiceDeps) {
               return;
             }
 
-            // Si status === "noChanges", continúa abajo al camino de consulta con chatReply
+            if (editResult.status === "noChanges") {
+              const hasQuestionMark =
+                rawQuestion.includes("?") || rawQuestion.includes("¿");
+
+              if (!hasQuestionMark) {
+                const baseMsg =
+                  "no encontré qué cambiar en el diagrama con ese pedido. Por favor, reformúlalo o sé más específico indicando el nombre de la clase o atributo.";
+                const msg = ensureAddressedByName(baseMsg, cleanAsker);
+                resolve({
+                  message: msg,
+                  operations: [],
+                  kind: "answer",
+                });
+                return;
+              }
+
+              // Si contiene "?" o "¿", continúa abajo al camino de consulta con chatReply
+            }
           }
 
           // Camino de consulta (CU19):

@@ -174,7 +174,7 @@ describe("CU20: aiChatService con modificaciones de diagrama", () => {
     assert.match(result.message, /\(1 cambio no se pudo aplicar\)\./);
   });
 
-  test("6. Caso noChanges cae al camino de consulta con chatReply", async () => {
+  test("6a. Caso noChanges sin '?' produce mensaje de reformular sin llamar a chatReply", async () => {
     let chatCalled = false;
 
     const service = createAiChatService({
@@ -194,6 +194,42 @@ describe("CU20: aiChatService con modificaciones de diagrama", () => {
       askerName: "Marcos",
       askerMessageId: "m6",
       question: "agrega lo que consideres",
+      onOperations: async () => ({ applied: 1, failed: 0 }),
+    });
+
+    assert.equal(chatCalled, false);
+    assert.equal(result.kind, "answer");
+    assert.deepEqual(result.operations, []);
+    assert.match(
+      result.message,
+      /Marcos, no encontré qué cambiar en el diagrama con ese pedido/i
+    );
+    assert.match(
+      result.message,
+      /reformúlalo o sé más específico/i
+    );
+  });
+
+  test("6b. Caso noChanges con '?' cae al camino de consulta con chatReply", async () => {
+    let chatCalled = false;
+
+    const service = createAiChatService({
+      getDiagramModel: async () => sampleModel,
+      listRecentMessages: async () => [],
+      chat: async () => {
+        chatCalled = true;
+        return "El modelo ya está actualizado.";
+      },
+      requestDiagramEdit: async () => ({
+        status: "noChanges",
+      }),
+    });
+
+    const result = await service.answerInRoom({
+      diagramId: "d1",
+      askerName: "Marcos",
+      askerMessageId: "m6b",
+      question: "¿puedes agregar algo al diagrama?",
       onOperations: async () => ({ applied: 1, failed: 0 }),
     });
 
