@@ -8,8 +8,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "test": "tsx --test src/mobileGenerator/converter.test.ts src/chat/chatRepository.test.ts src/chat/socketChatEvents.test.ts src/chat/diagramChatEndpoint.test.ts src/ai/providers/aiProviders.test.ts src/chat/aiChatHelpers.test.ts src/chat/chatContext.test.ts src/chat/aiChatService.test.ts src/chat/modificationHelpers.test.ts src/chat/diagramAiEditService.test.ts src/chat/aiChatServiceCu20.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "tsx --test src/mobileGenerator/converter.test.ts src/chat/chatRepository.test.ts src/chat/socketChatEvents.test.ts src/chat/diagramChatEndpoint.test.ts src/ai/providers/aiProviders.test.ts src/chat/aiChatHelpers.test.ts src/chat/chatContext.test.ts src/chat/aiChatService.test.ts src/chat/modificationHelpers.test.ts src/chat/diagramAiEditService.test.ts src/chat/aiChatServiceCu20.test.ts src/chat/diagramReview.test.ts src/chat/diagramReviewService.test.ts src/chat/aiChatServiceCu21.test.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke:cu20": "tsx scripts/cu20-socket-smoke.ts",
+    "smoke:cu21": "tsx src/scripts/cu21-socket-smoke.ts"
   },
   "keywords": [],
   "author": "",

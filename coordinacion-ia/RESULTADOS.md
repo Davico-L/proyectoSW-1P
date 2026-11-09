@@ -1367,6 +1367,145 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Notas y Observaciones**:
   - Solo se modificaron los archivos permitidos `modificationHelpers.ts` y `modificationHelpers.test.ts`.
 
+### [RES-094] Implementación de reviewModel y Reglas de Revisión de Diagramas (CU21 Fase 1A)
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-094
+- **Entregables Producidos**:
+  - `backend/src/chat/diagramReview.ts` (**nuevo**):
+    - Función pura `reviewModel(model: UmlModel): Finding[]` que evalúa 10 reglas del servidor (R1 a R10).
+    - Tipado estricto con los tipos reales del modelo UML (`UmlModel`, `UmlClass`, `UmlRelation`, `UmlAttribute`) de `backendGenerator/types.ts`.
+    - Reglas implementadas:
+      - R1 (recomendado): Clase sin atributos que no es hija de otra. Sugiere en el fix `@Codia agrega el atributo id a X` si es una clase, o remite a editar cada una si son varias.
+      - R2 (importante): Clase no hija con al menos 1 atributo cuyo primer atributo no parece identificador (nombre normalizado sin tildes/minúsculas no es "id" ni empieza con "id"/"cod"). Mensaje indica que el backend toma el primer atributo como PK; fix indica editar con doble clic y ubicar el identificador como primer atributo (sin comando de chat).
+      - R3 (recomendado): Clase aislada (sin relaciones) cuando hay al menos 2 clases.
+      - R4 (recomendado): Relación que no sea herencia con multiplicidad vacía (`""`).
+      - R5 (recomendado): Relación `manyToMany` o con `*` en ambos extremos sin clase intermedia; fix con pedido válido de chat para crear la clase intermedia (`@Codia crea la clase ...`).
+      - R6: Nombres duplicados (importante) o pares singular/plural (recomendado).
+      - R7 (importante): Atributos repetidos dentro de una clase (ignorando mayúsculas y tildes); fix indica doble clic para revisar y corregir (sin sugerir quitar ni renombrar atributos).
+      - R8 (recomendado): Nombres de clase que no empiezan con mayúscula o llevan espacios en una sola Finding.
+      - R9 (importante): Clases hijas con más de un padre o ciclos en la jerarquía de herencia (detectados vía DFS).
+      - R10 (recomendado): Relaciones duplicadas entre el mismo par de clases y del mismo tipo.
+    - Acotado a un máximo de 6 Finding, ordenadas con severidad `"importante"` antes que `"recomendado"`.
+    - Mensajes y fixes redactados en español en texto plano sin markdown.
+  - `backend/src/chat/diagramReview.test.ts` (**nuevo**):
+    - Suite de 34 pruebas automatizadas con `node:test` y `node:assert/strict`.
+    - Casos positivos y negativos para cada regla (R1 a R10).
+    - Caso específico de clase hija que no dispara R1 ni R2.
+    - Caso de diagrama sano que devuelve `[]`.
+    - Caso de modelo vacío o sin clases que devuelve `[]`.
+    - Verificación del límite de 6 hallazgos.
+    - Verificación del orden por severidad (`"importante"` antes de `"recomendado"`).
+    - Verificación de que ningún fix sugiere quitar ni renombrar atributos.
+    - Verificación de ausencia de markdown en `message` y `fix`.
+- **Verificación Realizada**:
+  - `npx tsx --test backend/src/chat/diagramReview.test.ts`: 34/34 pruebas en verde.
+  - `npm --prefix backend test`: 236/236 pruebas en verde (suites completas del backend).
+  - `npm --prefix backend run typecheck`: 0 errores de tipado TypeScript (`tsc --noEmit`).
+  - `git status --short`: Cero modificaciones en archivos preexistentes del backend o frontend.
+- **Notas y Observaciones**:
+  - Preparado para su integración en el enrutador de `aiChatService.ts` en la siguiente fase (Fase 1B).
+
+### [RES-095] Formateadores de Revisión para Prompt y Fallback (CU21 Fase 1B)
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-095
+- **Entregables Producidos**:
+  - `backend/src/chat/diagramReview.ts` (**modificado**):
+    - `formatFindingsForPrompt(findings: Finding[]): string`: Formatea las observaciones como lista numerada en texto plano (`"1. [importante] Clases: A, B. <message> Frase sugerida: <fix>"` si empieza con `@Codia`, o `"Qué hacer: <fix>"` si no). Sin markdown.
+    - `formatFindingsFallback(findings: Finding[], askerName: string): string`: Texto que se publica cuando ningún proveedor responde, dirigido por nombre (`"Ana, revisé el diagrama y encontré N observaciones:"`), lista numerada con message y fix, invitación final a pedir cambios a Codia, y acotado al límite máximo de 2000 caracteres (`MAX_CHAT_MESSAGE_LENGTH`) garantizando no desbordar `chatRepository` ni `socket.ts`.
+    - `formatNoFindingsMessage(askerName: string): string`: Mensaje breve y cercano (`"Ana, revisé el diagrama y no encontré problemas de estructura."` o sin nombre) sin saludos ni presentaciones.
+    - `formatEmptyDiagramMessage(askerName: string): string`: Informa que el diagrama está vacío y no hay elementos para revisar.
+    - Constante exportada `MAX_CHAT_MESSAGE_LENGTH = 2000`.
+  - `backend/src/chat/diagramReview.test.ts` (**modificado**):
+    - Suite de 18 pruebas nuevas para formateadores (totalizando 52 pruebas en el archivo).
+    - Verificación de formato exacto de prompt y fallback, casos con y sin nombre de usuario, tratamiento de singular (`1 observación`) y plural.
+    - Verificación estricta de ausencia de cualquier marca markdown (asteriscos `*`, almohadillas `#`, comillas invertidas `` ` ``, guiones de lista `- `).
+    - Verificación del peor caso con 6 observaciones extensas garantizando `<= 2000` caracteres.
+- **Verificación Realizada**:
+  - `npx tsx --test backend/src/chat/diagramReview.test.ts`: 52/52 pruebas en verde.
+  - `npm --prefix backend test`: 236/236 pruebas en verde (suites completas del backend).
+  - `npm --prefix backend run typecheck`: 0 errores de compilación TypeScript (`tsc --noEmit`).
+  - `git status --short`: Cero modificaciones en código preexistente del backend o frontend.
+- **Notas y Observaciones**:
+  - Todo el subsistema de análisis y formateo de CU21 está listo para conectarse al flujo del chat en la siguiente etapa.
+
+### [RES-096] Ampliación de classifyIntent con Intención "review" (CU21 Fase 1C)
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-096
+- **Entregables Producidos**:
+  - `backend/src/chat/modificationHelpers.ts` (**modificado**):
+    - Tipo de retorno de `classifyIntent(text)` ampliado a `"query" | "modification" | "review"`.
+    - Regla 1c ("review"):
+      - Verbos de revisión (`revisa`, `evalua`, `valida`, `analiza`, `audita`, `verifica`, `chequea`) junto a objetos de revisión (`diagrama`, `modelo`, `clases`, `relaciones`, `esquema`, `diseno`, `estructura`, `entidades`).
+      - Frases clave de revisión (`"que le falta"`, `"que mejorarias"`, `"sugerencias"`, `"mejoras"`, `"esta bien"`, `"tiene errores"`, `"feedback"`).
+      - Mejora u optimización general aplicada al diagrama o modelo (`"mejora el diagrama"`, `"optimiza el modelo"`).
+    - Jerarquía de prioridades estricta:
+      - Preguntas de explicación conceptual (`"¿qué es una clave primaria?"`, `"explícame qué es una relación..."`) se mantienen como `"query"` en Regla 1 / 1b.
+      - Preguntas con verbos de revisión que preguntan "cómo hacerlo" (`"¿cómo reviso el diagrama?"`) se mantienen como `"query"`.
+      - Pedidos con objetivo concreto de modificación (`"agrega..."`, `"crea..."`, `"mejora la clase Cliente agregando nombre"`, `"mejora la clase Cliente"`) prevalecen como `"modification"`.
+    - Comportamiento de `aiChatService.ts` intacto: compila sin errores sin modificar código.
+  - `backend/src/chat/modificationHelpers.test.ts` (**modificado**):
+    - Se conservaron el 100% de las 93 pruebas de regresión previas sin alterar.
+    - Se añadieron 13 pruebas unitarias nuevas para cubrir:
+      - 5 casos requeridos de review: `"@Codia revisa el diagrama"`, `"@Codia ¿qué le falta a mi diagrama?"`, `"@Codia dame sugerencias de mejora"`, `"@Codia mejora el diagrama"`, `"@Codia valida las relaciones"`.
+      - 4 casos requeridos que no son review: `"@Codia agrega el atributo id a Cliente"`, `"@Codia mejora la clase Cliente agregando nombre"`, `"@Codia ¿qué es una clave primaria?"`, `"@Codia explícame qué es una relación muchos a muchos"`.
+      - Casos adicionales de verbos de revisión, frases clave, mejora general vs específica y preguntas de explicación con verbos de revisión.
+      - Total suite: 106 pruebas pasadas.
+- **Verificación Realizada**:
+  - `npm --prefix backend test`: 249/249 pruebas en verde (suites completas del backend).
+  - `npx tsx --test backend/src/chat/diagramReview.test.ts`: 52/52 pruebas en verde.
+  - `npm --prefix backend run typecheck`: 0 errores de tipado TypeScript (`tsc --noEmit`).
+  - `git status --short`: Solo modificados `modificationHelpers.ts` y su archivo de pruebas.
+- **Notas y Observaciones**:
+  - Cero fallos en llamadores existentes; `aiChatService.ts` no requirió cambios de código para typecheck.
+
+### [RES-097] Corrección y Completitud de CU21 Fase 2B
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-097
+- **Entregables Producidos**:
+  - `backend/src/chat/diagramReviewService.ts` (**modificado**): Envuelta la llamada por defecto a `chatWithFallback` para extraer `.text` resolviendo TS2322.
+  - `backend/src/chat/modificationHelpers.ts` (**modificado**): Eliminada la regla `/\bcomo\s+(?:lo\s+)?ves\b/` para que preguntas como `"¿Cómo ves el modelo?"` se clasifiquen como `"query"`.
+  - `backend/src/chat/modificationHelpers.test.ts` (**modificado**): Eliminada la aserción dependiente de esa frase (`"¿cómo ves el diagrama?"`), manteniendo 105 pruebas activas en verde.
+  - `backend/src/chat/chatRepository.ts` (**modificado**): Inclusión de `findings` en `docToInsert`, en el retorno de `saveMessage` y en el mapeo de `listMessages`. Confirmado que `toPublicChatMessage` no expone `findings`.
+  - `backend/src/chat/aiChatService.ts` (**modificado**): Agregado `findings?: any[]` en `AnswerInRoomResult` y propagado `findings: reviewResult.findings` en el `resolve` de la rama `review`.
+  - `backend/src/socket.ts` (**modificado**): Propagado `findings: result.findings` a `saveMessage`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores de compilación (`tsc --noEmit`).
+  - `npm --prefix backend test`: 301/301 pruebas pasadas (12 suites, 0 fallos), incluyendo la prueba 4 de `aiChatService.test.ts` (CU19).
+- **Notas y Observaciones**:
+  - La rama `review` preserva la cola FIFO y retén de turno sin fugas.
+
+### [RES-098] Implementación de CU21 Fase 2C (Alineación de Tokens, Pruebas y Smoke Script)
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-098
+- **Entregables Producidos**:
+  - `backend/src/chat/diagramReviewService.ts` (**modificado**): Se removió el parámetro fijo `maxTokens: 400` de `chatFn`, permitiendo que cada proveedor aplique sus límites y configuraciones por defecto (Groq 700 con low reasoning, Local 550, Gemini 400 sin razonamiento), alineado idénticamente con CU19.
+  - `backend/src/chat/diagramReviewService.test.ts` (**nuevo**): 6 pruebas unitarias (`node:test`) para modelo vacío, sin observaciones, con observaciones, fallo de IA, IA vacía y tope de 2000 caracteres.
+  - `backend/src/chat/aiChatServiceCu21.test.ts` (**nuevo**): 5 pruebas unitarias (`node:test`) de enrutamiento en `answerInRoom` para `review`, `query`, `modification` con y sin `onOperations`, y ausencia de mutación en `review`.
+  - `backend/src/scripts/cu21-socket-smoke.ts` (**nuevo**): Script de smoke test por Socket.IO que se conecta, envía `"@Codia revisa el diagrama"` y reporta texto, destinatario y latencia.
+  - `backend/package.json` (**modificado**): Incorporadas las dos suites nuevas a `test` y scripts `"smoke:cu20"` y `"smoke:cu21"`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores de compilación (`tsc --noEmit`).
+  - `npm --prefix backend test`: 312/312 pruebas en verde a través de 14 suites completas (100% éxito).
+- **Notas y Observaciones**:
+  - No se modificó ninguna prueba preexistente. Totalmente compatible hacia atrás con CU19 y CU20.
+
+### [RES-099] Ajuste del Prompt de Revisión y Contenido de Usuario (CU21)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-099
+- **Entregables Producidos**:
+  - `backend/src/chat/diagramReviewService.ts` (**modificado**):
+    - `REVIEW_SYSTEM_PROMPT` reescrito para eliminar menciones a "Idea:" e ideas de dominio; exige hablar solo de las observaciones entregadas (ni una más ni una menos); prohíbe tipos de datos, enumeraciones, convenciones o ejemplos inventados; exige párrafos cortos en español natural sin listas numeradas ni etiquetas de entrada (`[importante]`, `[recomendado]`, `Clases:`, `Frase sugerida:`, `Qué hacer:`); prioriza importantes y agrupa si son más de 4; copia frases `@Codia` literales o usa palabras de la observación sin inventar pasos; máximo 150 palabras, sin saludo/presentación/markdown; cierre con pregunta corta sin instrucción copiable literal.
+    - `userContent` modificado para anteponer `Hay exactamente N observaciones.` antes de la lista.
+  - `backend/src/chat/diagramReviewService.test.ts` (**modificado**): Aserciones actualizadas para comprobar la línea `Hay exactamente N observaciones.` y la eliminación de `Idea:`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores de compilación (`tsc --noEmit`).
+  - `Set-Location backend; npm test`: 312/312 pruebas en verde en las 14 suites (100% éxito).
+- **Notas y Observaciones**:
+  - Se previno el copiado de etiquetas y alucinaciones de dominio en proveedores con menor razonamiento (Groq).
+
+
+
+
 
 
 

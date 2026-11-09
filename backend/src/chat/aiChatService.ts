@@ -7,6 +7,7 @@ import {
 } from "./aiChatHelpers";
 import { classifyIntent, summarizeOperations } from "./modificationHelpers";
 import { requestDiagramEdit } from "./diagramAiEditService";
+import { reviewDiagramInRoom, ReviewDiagramInRoomDeps } from "./diagramReviewService";
 
 export class AiBusyError extends Error {
   constructor(
@@ -69,6 +70,7 @@ export interface AiChatServiceDeps {
   ) => Promise<string>;
   requestDiagramEdit?: typeof requestDiagramEdit;
   classifyIntent?: typeof classifyIntent;
+  reviewDiagram?: ReviewDiagramInRoomDeps["reviewDiagram"];
 }
 
 export interface AnswerInRoomParams {
@@ -87,6 +89,7 @@ export interface AnswerInRoomResult {
   operations: any[];
   kind?: "answer" | "modification";
   warnings?: string[];
+  findings?: any[];
 }
 
 export function createAiChatService(deps: AiChatServiceDeps) {
@@ -139,9 +142,9 @@ export function createAiChatService(deps: AiChatServiceDeps) {
           const editDiagram = deps.requestDiagramEdit ?? requestDiagramEdit;
 
           const hasOnOperations = typeof params.onOperations === "function";
-          const intent = hasOnOperations ? classify(rawQuestion) : "query";
+          const intent = classify(rawQuestion);
 
-          if (intent === "modification") {
+          if (intent === "modification" && hasOnOperations) {
             const editResult = await editDiagram({
               diagramId: params.diagramId,
               instruction: rawQuestion,
@@ -245,6 +248,29 @@ export function createAiChatService(deps: AiChatServiceDeps) {
 
               // Si contiene "?" o "¿", continúa abajo al camino de consulta con chatReply
             }
+          }
+
+          // Rama "review" (CU21): Codia revisa el diagrama sin modificarlo
+          if (intent === "review") {
+            const reviewDeps: ReviewDiagramInRoomDeps = {
+              getDiagramModel: deps.getDiagramModel,
+              chat: deps.chat,
+              reviewDiagram: deps.reviewDiagram,
+            };
+            const reviewResult = await reviewDiagramInRoom(
+              {
+                diagramId: params.diagramId,
+                askerName: cleanAsker,
+              },
+              reviewDeps
+            );
+            resolve({
+              message: reviewResult.message,
+              operations: [],
+              kind: "answer",
+              findings: reviewResult.findings,
+            });
+            return;
           }
 
           // Camino de consulta (CU19):

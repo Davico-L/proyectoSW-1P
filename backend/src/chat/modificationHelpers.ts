@@ -261,6 +261,11 @@ const MODIFICATION_PREFIXES: readonly string[] = [
   "podrias",
   "puedes",
   "podes",
+  // Modificación concreta sobre clase o atributo con mejora/optimización
+  "mejora la clase",
+  "mejora a la clase",
+  "optimiza la clase",
+  "optimiza a la clase",
   // Verbos de modificación
   "agregale",
   "agrega",
@@ -281,6 +286,247 @@ const MODIFICATION_PREFIXES: readonly string[] = [
   "convierte",
   "haz",
 ];
+
+// Verbos de acción directa de modificación
+const MODIFICATION_ACTION_VERBS: readonly string[] = [
+  "agregale",
+  "agrega",
+  "anade",
+  "creame",
+  "crea",
+  "elimina",
+  "borra",
+  "quita",
+  "cambia",
+  "modifica",
+  "renombra",
+  "edita",
+  "actualiza",
+  "pon",
+  "relaciona",
+  "conecta",
+  "convierte",
+  "haz",
+  "mejora la clase",
+  "mejora a la clase",
+  "optimiza la clase",
+  "optimiza a la clase",
+];
+
+// Verbos de revisión para detección de intención "review"
+const REVIEW_VERBS: ReadonlySet<string> = new Set([
+  "revisa",
+  "revisar",
+  "revisame",
+  "revisale",
+  "revises",
+  "evalua",
+  "evaluar",
+  "evaluame",
+  "evaluale",
+  "evalues",
+  "valida",
+  "validar",
+  "validame",
+  "validale",
+  "valides",
+  "analiza",
+  "analizar",
+  "analizame",
+  "analizale",
+  "analices",
+  "audita",
+  "auditar",
+  "auditame",
+  "auditale",
+  "audites",
+  "verifica",
+  "verificar",
+  "verificame",
+  "verificale",
+  "verifiques",
+  "chequea",
+  "chequear",
+  "chequeame",
+  "chequeale",
+  "chequees",
+]);
+
+// Objetos sobre los cuales aplica una revisión
+const REVIEW_OBJECTS: ReadonlySet<string> = new Set([
+  "diagrama",
+  "diagramas",
+  "modelo",
+  "modelos",
+  "clase",
+  "clases",
+  "relacion",
+  "relaciones",
+  "esquema",
+  "esquemas",
+  "diseno",
+  "disenos",
+  "estructura",
+  "estructuras",
+  "entidad",
+  "entidades",
+]);
+
+/**
+ * Detecta si el texto contiene un verbo de revisión junto a un objeto de revisión.
+ */
+function hasReviewVerbWithObject(tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i++) {
+    const word = tokens[i];
+    if (REVIEW_VERBS.has(word)) {
+      // Buscar objeto de revisión en las 4 palabras siguientes
+      for (let j = i + 1; j <= i + 4 && j < tokens.length; j++) {
+        if (REVIEW_OBJECTS.has(tokens[j])) {
+          return true;
+        }
+      }
+      // O en las 3 palabras anteriores (ej. "al diagrama, revisalo")
+      for (let j = Math.max(0, i - 3); j < i; j++) {
+        if (REVIEW_OBJECTS.has(tokens[j])) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Detecta frases clave de revisión:
+ * "qué le falta", "qué mejorarías", "sugerencias", "mejoras", "está bien", "tiene errores", "feedback".
+ */
+function isReviewPhrase(normalized: string): boolean {
+  // 1. "que le falta", "que le faltaria", "que falta en/a"
+  if (/\bque\s+(?:le\s+)?falta(?:ria)?\b/u.test(normalized)) {
+    return true;
+  }
+
+  // 2. "que mejorarias", "que cambiarias", "que le cambiarias"
+  if (/\bque\s+(?:le\s+)?(?:mejorarias|cambiarias)\b/u.test(normalized)) {
+    return true;
+  }
+
+  // 3. "sugerencias", "sugerencia" (ej. "dame sugerencias de mejora", "tienes sugerencias", "alguna sugerencia")
+  if (/\bsugerencias?\b/u.test(normalized)) {
+    return true;
+  }
+
+  // 4. "mejoras" (en contexto de revisión: "propone mejoras", "que mejoras", "posibles mejoras", "sugerencias de mejora")
+  if (
+    /\b(?:propone|proponer|dame|algunas?|posibles?|oportunidades?\s+de|que)\s+mejoras?\b/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  // 5. "esta bien" (ej. "esta bien mi diagrama?", "esta bien el modelo?", "esta bien?")
+  if (/\besta\s+bien\b/u.test(normalized)) {
+    return true;
+  }
+
+  // 6. "tiene errores", "hay errores", "encuentras errores"
+  if (
+    /\b(?:tiene|hay|encuentras?|ves)\s+(?:algun\s+)?errores?\b/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  // 7. "feedback" (ej. "dame feedback", "feedback del modelo")
+  if (/\bfeedback\b/u.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detecta "mejora" u "optimiza" aplicados al diagrama o modelo en general
+ * (ej. "mejora el diagrama", "optimiza el modelo"), distinguiéndolos de
+ * objetivos concretos como "mejora la clase X".
+ */
+function hasGeneralDiagramImprovement(
+  tokens: string[],
+  normalized: string
+): boolean {
+  // Si especifica una clase concreta ("mejora la clase..."), no es general
+  if (
+    /\b(?:mejora|optimiza|mejorar|optimizar)\s+(?:a\s+)?(?:la\s+)?clase\b/u.test(
+      normalized
+    )
+  ) {
+    return false;
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
+    const word = tokens[i];
+    if (
+      word === "mejora" ||
+      word === "mejorar" ||
+      word === "optimiza" ||
+      word === "optimizar"
+    ) {
+      for (let j = i + 1; j <= i + 4 && j < tokens.length; j++) {
+        const target = tokens[j];
+        if (
+          target === "diagrama" ||
+          target === "modelo" ||
+          target === "esquema" ||
+          target === "diseno" ||
+          target === "estructura"
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Detecta si la frase contiene un pedido con objetivo concreto de modificación
+ * que debe prevalecer como "modification" (ej. "agrega...", "crea...", "elimina...",
+ * "mejora la clase X agregando...", etc.).
+ */
+function hasConcreteModificationCommand(
+  tokens: string[],
+  normalized: string
+): boolean {
+  // "mejora la clase X" o "optimiza la clase X"
+  if (
+    /\b(?:mejora|optimiza|mejorar|optimizar)\s+(?:a\s+)?(?:la\s+)?clase\b/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  // Verbos de acción directa de modificación al inicio
+  for (const prefix of MODIFICATION_ACTION_VERBS) {
+    if (startsWithPrefix(normalized, prefix)) {
+      return true;
+    }
+  }
+
+  // Gerundios de modificación que indican acción concreta
+  if (
+    /\b(?:agregando|creando|eliminando|borrando|quitando|cambiando|modificando|renombrando)\b/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
 
 // Palabras o raíces interrogativas y de explicación prohibidas en cualquier posición para Regla 2b
 const NON_INITIAL_QUERY_WORDS: ReadonlySet<string> = new Set([
@@ -326,16 +572,26 @@ function startsWithPrefix(text: string, prefix: string): boolean {
 }
 
 /**
- * Clasifica la intención del mensaje del usuario entre "query" o "modification".
+ * Clasifica la intención del mensaje del usuario entre "query", "modification" o "review".
  * Reglas en orden estricto:
- * 1. Si empieza con palabra interrogativa o de explicación, es "query" (incluso si contiene un verbo de acción).
- * 1b. Si empieza con fórmula de cortesía y la palabra siguiente es verbo de explicación o palabra interrogativa, es "query".
- * 2. Si empieza con fórmula de cortesía o verbo de modificación, es "modification".
+ * 1. Si empieza con palabra interrogativa o de explicación conceptual, es "query" (incluso si contiene un verbo de acción),
+ *    salvo que sea una frase específica de revisión (ej. "¿qué le falta a mi diagrama?", "¿qué mejorarías?").
+ * 1b. Si empieza con fórmula de cortesía y la palabra siguiente es verbo de explicación o palabra interrogativa, es "query"
+ *     (salvo que la continuación sea una frase de revisión).
+ * 1c. Si coincide con una intención de revisión ("review") y NO contiene un pedido con objetivo concreto de modificación
+ *     (ej. "agrega...", "crea...", "elimina...", "mejora la clase X agregando..."), se clasifica como "review":
+ *     - Verbos de revisión (revisa, evalúa, valida, analiza, audita, verifica, chequea) junto a un objeto
+ *       (diagrama, modelo, clases, relaciones, esquema, diseño, estructura, entidades).
+ *     - Frases clave de revisión ("qué le falta", "qué mejorarías", "sugerencias", "mejoras", "está bien", "tiene errores", "feedback").
+ *     - "Mejora" u "optimiza" aplicados al diagrama o modelo en general ("mejora el diagrama").
+ * 2. Si empieza con fórmula de cortesía o verbo de modificación (incluyendo "mejora la clase X"), es "modification".
  * 2b. Si el texto no contiene signos "?" ni "¿", no contiene palabras interrogativas ni de explicación en ninguna
  *     posición, y contiene un verbo de modificación como palabra completa en las primeras 8 palabras, es "modification".
  * 3. Todo lo demás, y el texto vacío, es "query".
  */
-export function classifyIntent(text: string): "query" | "modification" {
+export function classifyIntent(
+  text: string
+): "query" | "modification" | "review" {
   const normalized = normalizeForIntent(text);
   if (!normalized) {
     return "query";
@@ -344,6 +600,10 @@ export function classifyIntent(text: string): "query" | "modification" {
   // Regla 1: Palabra interrogativa o de explicación al inicio
   for (const prefix of QUERY_PREFIXES) {
     if (startsWithPrefix(normalized, prefix)) {
+      // Excepción: Preguntas de revisión explícitas (ej. "¿qué le falta a mi diagrama?", "¿qué mejorarías?", "dime qué le falta")
+      if (isReviewPhrase(normalized)) {
+        return "review";
+      }
       return "query";
     }
   }
@@ -360,8 +620,32 @@ export function classifyIntent(text: string): "query" | "modification" {
         ...COURTESY_INTERROGATIVES,
       ].some((starter) => startsWithPrefix(remainder, starter));
       if (isQueryFollowup) {
+        if (isReviewPhrase(remainder) || isReviewPhrase(normalized)) {
+          return "review";
+        }
         return "query";
       }
+    }
+  }
+
+  const cleanTokens = normalized
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  // Regla 1c: Intención de revisión ("review")
+  // Se evalúa antes de Regla 2 (para que frases como "podrías revisar el diagrama" o "mejora el diagrama"
+  // no caigan en modification), SIEMPRE QUE no contenga un pedido con objetivo concreto de modificación
+  // (ej. "agrega...", "crea...", "mejora la clase Cliente agregando nombre", etc.).
+  const hasConcreteMod = hasConcreteModificationCommand(cleanTokens, normalized);
+  if (!hasConcreteMod) {
+    if (
+      hasReviewVerbWithObject(cleanTokens) ||
+      isReviewPhrase(normalized) ||
+      hasGeneralDiagramImprovement(cleanTokens, normalized)
+    ) {
+      return "review";
     }
   }
 
@@ -378,21 +662,15 @@ export function classifyIntent(text: string): "query" | "modification" {
     !text.includes("?") &&
     !text.includes("¿")
   ) {
-    const tokens = normalized
-      .replace(/[^\p{L}\p{N}\s]/gu, " ")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-
     const hasInterrogativePhrase =
       /\bpor\s+que\b/u.test(normalized) || /\bpara\s+que\b/u.test(normalized);
 
     const hasInterrogativeWord =
       hasInterrogativePhrase ||
-      tokens.some((token) => NON_INITIAL_QUERY_WORDS.has(token));
+      cleanTokens.some((token) => NON_INITIAL_QUERY_WORDS.has(token));
 
     if (!hasInterrogativeWord) {
-      const first8 = tokens.slice(0, 8);
+      const first8 = cleanTokens.slice(0, 8);
       const hasModificationVerb = first8.some((token) =>
         NON_INITIAL_MODIFICATION_VERBS.has(token)
       );

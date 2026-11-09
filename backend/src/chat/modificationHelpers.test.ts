@@ -443,6 +443,122 @@ describe("CU20: modificationHelpers", () => {
       assert.equal(classifyIntent(renameText), "modification");
       assert.equal(detectUnsupportedAttributeRequest(renameText), "rename");
     });
+
+    // ==========================================
+    // CU21 Fase 1C: Intención "review" y prioridades
+    // ==========================================
+    describe("CU21: intención 'review' y prioridades", () => {
+      // Casos requeridos expresamente en la especificación
+      test("caso requerido: '@Codia revisa el diagrama' -> review", () => {
+        assert.equal(classifyIntent("@Codia revisa el diagrama"), "review");
+      });
+
+      test("caso requerido: '@Codia ¿qué le falta a mi diagrama?' -> review", () => {
+        assert.equal(
+          classifyIntent("@Codia ¿qué le falta a mi diagrama?"),
+          "review"
+        );
+      });
+
+      test("caso requerido: '@Codia dame sugerencias de mejora' -> review", () => {
+        assert.equal(
+          classifyIntent("@Codia dame sugerencias de mejora"),
+          "review"
+        );
+      });
+
+      test("caso requerido: '@Codia mejora el diagrama' -> review", () => {
+        assert.equal(classifyIntent("@Codia mejora el diagrama"), "review");
+      });
+
+      test("caso requerido: '@Codia valida las relaciones' -> review", () => {
+        assert.equal(classifyIntent("@Codia valida las relaciones"), "review");
+      });
+
+      test("caso requerido: '@Codia agrega el atributo id a Cliente' -> modification (no review)", () => {
+        assert.equal(
+          classifyIntent("@Codia agrega el atributo id a Cliente"),
+          "modification"
+        );
+      });
+
+      test("caso requerido: '@Codia mejora la clase Cliente agregando nombre' -> modification (no review)", () => {
+        assert.equal(
+          classifyIntent("@Codia mejora la clase Cliente agregando nombre"),
+          "modification"
+        );
+      });
+
+      test("caso requerido: '@Codia ¿qué es una clave primaria?' -> query (no review)", () => {
+        assert.equal(
+          classifyIntent("@Codia ¿qué es una clave primaria?"),
+          "query"
+        );
+      });
+
+      test("caso requerido: '@Codia explícame qué es una relación muchos a muchos' -> query (no review)", () => {
+        assert.equal(
+          classifyIntent(
+            "@Codia explícame qué es una relación muchos a muchos"
+          ),
+          "query"
+        );
+      });
+
+      // Verbos de revisión con objetos de revisión
+      test("verbos de revisión (evalúa, analiza, audita, verifica, chequea) con objetos -> review", () => {
+        assert.equal(classifyIntent("@Codia evalúa las clases"), "review");
+        assert.equal(classifyIntent("@Codia analiza el modelo"), "review");
+        assert.equal(classifyIntent("@Codia audita el esquema"), "review");
+        assert.equal(classifyIntent("@Codia verifica el diseño"), "review");
+        assert.equal(classifyIntent("@Codia chequea la estructura"), "review");
+        assert.equal(classifyIntent("puedes revisar el diagrama?"), "review");
+        assert.equal(
+          classifyIntent("podrías validar las relaciones?"),
+          "review"
+        );
+        assert.equal(
+          classifyIntent("ayúdame a analizar el modelo"),
+          "review"
+        );
+      });
+
+      // Frases clave de revisión
+      test("frases de revisión ('qué mejorarías', 'está bien', 'tiene errores', 'feedback') -> review", () => {
+        assert.equal(
+          classifyIntent("¿qué mejorarías en el diagrama?"),
+          "review"
+        );
+        assert.equal(classifyIntent("¿está bien mi diagrama?"), "review");
+        assert.equal(
+          classifyIntent("¿tiene errores el diagrama?"),
+          "review"
+        );
+        assert.equal(classifyIntent("dame feedback del modelo"), "review");
+        assert.equal(
+          classifyIntent("propone mejoras para las clases"),
+          "review"
+        );
+      });
+
+      // Mejora general vs mejora concreta de clase
+      test("mejora u optimiza general al modelo -> review; sobre una clase específica -> modification", () => {
+        assert.equal(classifyIntent("mejora el modelo"), "review");
+        assert.equal(classifyIntent("optimiza el diagrama"), "review");
+        assert.equal(classifyIntent("mejora la clase Cliente"), "modification");
+        assert.equal(classifyIntent("optimiza la clase Usuario"), "modification");
+      });
+
+      // Consultas explicativas con verbos de revisión permanecen query
+      test("preguntas 'cómo' y explicaciones conceptuales permanecen query", () => {
+        assert.equal(classifyIntent("¿cómo reviso el diagrama?"), "query");
+        assert.equal(
+          classifyIntent("explícame cómo validar relaciones"),
+          "query"
+        );
+        assert.equal(classifyIntent("dime qué es una agregación"), "query");
+      });
+    });
   });
 
   describe("summarizeOperations", () => {

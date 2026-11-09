@@ -6,6 +6,103 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-099
+- **Nombre**: Ajuste del prompt de revisión y contenido de usuario (CU21)
+- **Fecha de Inicio**: 2026-11-09
+- **Estado**: Completada
+- **Objetivo**: En `backend/src/chat/diagramReviewService.ts`:
+  (1) Actualizar `REVIEW_SYSTEM_PROMPT` para eliminar mención a ideas/dominio, exigir ceñirse exclusivamente a las observaciones entregadas, prohibir tipos de datos o convenciones inventadas, exigir redacción en párrafos cortos sin copiar etiquetas de entrada ni listas numeradas, priorizar importantes y agrupar si son > 4, copiar frases `@Codia` literales o explicar con palabras de la observación, límite 150 palabras, sin saludo/presentación/markdown y cierre con pregunta corta sin instrucción copiable literal.
+  (2) En `userContent`, anteponer la línea `"Hay exactamente N observaciones."` antes de la lista de observaciones.
+  (3) Si aplica, actualizar pruebas en `diagramReviewService.test.ts`.
+  (4) Validar con `typecheck` y `npm test`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-098
+- **Nombre**: Implementación de CU21 Fase 2C (Alineación de tokens, pruebas y smoke test)
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `diagramReviewService.ts`, alinear la llamada a `chat` con la rama de consulta de CU19 (no pasar `maxTokens` fijo para que los proveedores apliquen sus propios límites por defecto).
+  (2) Crear `backend/src/chat/diagramReviewService.test.ts` con pruebas completas para modelo vacío, sin observaciones, con observaciones, fallo/vacío de IA y límite de 2000 caracteres.
+  (3) Crear `backend/src/chat/aiChatServiceCu21.test.ts` con pruebas de enrutamiento de `answerInRoom` (review, query, modification con/sin onOperations, no mutación en review).
+  (4) Agregar las dos suites a `test` en `package.json`.
+  (5) Crear `backend/src/scripts/cu21-socket-smoke.ts` y su script en `package.json` siguiendo el patrón de CU20.
+  (6) Validar con `typecheck` y `npm test`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-097
+- **Nombre**: Corrección y completitud de CU21 Fase 2B (Revisión de Diagrama en Chat)
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `diagramReviewService.ts`, tipar la dependencia por defecto de chat para devolver `string` extrayendo `.text` de `chatWithFallback`.
+  (2) En `modificationHelpers.ts`, remover la regla `/\bcomo\s+(?:lo\s+)?ves\b/` de review para que `"¿Cómo ves el modelo?"` vuelva a ser query, restableciendo la prueba 4 de `aiChatService.test.ts`. Ajustar pruebas de Fase 1C si alguna dependía de esa frase.
+  (3) Propagar `findings` desde `reviewDiagramInRoom` hasta `saveMessage` en Mongo a través de `aiChatService.ts` y `socket.ts`, persistiendo en `chatRepository.ts` sin difundir a los clientes.
+  (4) Verificar typecheck y la suite completa de pruebas.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-096
+- **Nombre**: Ampliación de classifyIntent con intención "review" (CU21 Fase 1C)
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `backend/src/chat/modificationHelpers.ts`, ampliar el tipo de retorno de `classifyIntent(text: string): "query" | "modification" | "review"`.
+  (2) Implementar las reglas de clasificación para `"review"`:
+      - Verbos de revisión (`revisa`, `evalua`, `valida`, `analiza`, `audita`, `verifica`, `chequea`, etc.) junto a objetos de revisión (`diagrama`, `modelo`, `clases`, `relaciones`, `esquema`, `diseno`).
+      - Frases clave como `"que le falta"`, `"que mejorarias"`, `"sugerencias"`, `"mejoras"`, `"esta bien"`, `"tiene errores"`, `"feedback"`.
+      - Verbos de mejora general aplicados al diagrama o modelo (`"mejora el diagrama"`, `"optimiza el modelo"`).
+      - Respetar prioridades estrictas: pedidos concretos de modificación sobre clases/atributos (`"agrega..."`, `"crea..."`, `"mejora la clase X..."`) siguen siendo `"modification"`.
+      - Interrogativos de explicación conceptual (`"qué es una clave primaria"`, `"explícame..."`) siguen siendo `"query"`.
+  (3) Si algún llamador falla en typecheck por el nuevo tipo, aplicar el cambio mínimo sin alterar el comportamiento de `aiChatService.ts`.
+  (4) En `backend/src/chat/modificationHelpers.test.ts`, mantener 100% de las pruebas existentes intactas y agregar pruebas nuevas para `"review"`, casos no-review y frases límite.
+  (5) Validar con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-095
+- **Nombre**: Implementación de formateadores de revisión para prompt y fallback (CU21 Fase 1B)
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `backend/src/chat/diagramReview.ts`, agregar y exportar las funciones puras:
+      - `formatFindingsForPrompt(findings: Finding[]): string`
+      - `formatFindingsFallback(findings: Finding[], askerName: string): string` (respetando tope de 2000 caracteres del chat)
+      - `formatNoFindingsMessage(askerName: string): string`
+      - `formatEmptyDiagramMessage(askerName: string): string`
+      Todas en texto plano sin markdown.
+  (2) En `backend/src/chat/diagramReview.test.ts`, agregar pruebas unitarias exhaustivas con `node:test` y `node:assert/strict` para cada función, caso con y sin nombre, validación de ausencia de markdown (asteriscos, almohadillas, comillas invertidas, guiones de lista) y verificación del largo máximo en el peor caso.
+  (3) No modificar ningún otro archivo.
+  (4) Validar con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-094
+- **Nombre**: Implementación de reviewModel y reglas de revisión de diagramas (CU21 Fase 1A)
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) Crear `backend/src/chat/diagramReview.ts` con la función pura `reviewModel(model: UmlModel): Finding[]`, tipado estricto con los tipos reales de `backendGenerator/types.ts` y las 10 reglas R1 a R10 (máximo 6 Finding, ordenadas por severidad `"importante"` antes que `"recomendado"`, sin sugerir quitar/renombrar atributos, sin markdown en `message` ni `fix`).
+  (2) Crear `backend/src/chat/diagramReview.test.ts` con suite completa usando `node:test` y `node:assert/strict`, cubriendo casos positivos y negativos por cada regla, clase hija que no dispara R1 ni R2, diagrama sano que devuelve `[]`, límite de 6 y orden por severidad.
+  (3) No modificar ningún archivo existente de código ni configuración de sincronización/rutas.
+  (4) Validar con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-093
 - **Nombre**: Ajuste de classifyIntent en CU20 para verbos de modificación no iniciales
 - **Fecha de Inicio**: 2026-11-08

@@ -369,6 +369,7 @@ export const initSocket = (
                     kind: result.kind,
                     operations: result.operations,
                     warnings: result.warnings,
+                    findings: result.findings,
                   });
 
                   io.to(targetDiagramId).emit(

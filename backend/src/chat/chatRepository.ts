@@ -34,6 +34,7 @@ export interface ChatMessageInput {
   kind?: string;
   operations?: any[];
   warnings?: string[];
+  findings?: any[];
 }
 
 export interface ChatMessageDocument {
@@ -51,6 +52,7 @@ export interface ChatMessageDocument {
   kind?: string;
   operations?: any[];
   warnings?: string[];
+  findings?: any[];
 }
 
 export interface PublicChatMessage {
@@ -122,6 +124,7 @@ export interface MongoChatMessageDoc {
   kind?: string;
   operations?: any[];
   warnings?: string[];
+  findings?: any[];
 }
 
 // Control de inicialización idempotente del índice por diagrama y fecha
@@ -243,6 +246,7 @@ export const saveMessage = async (
 
     const operations = Array.isArray(input?.operations) ? input.operations : undefined;
     const warnings = Array.isArray(input?.warnings) ? input.warnings : undefined;
+    const findings = Array.isArray(input?.findings) ? input.findings : undefined;
 
     const docToInsert: Omit<MongoChatMessageDoc, "_id"> = {
       diagramId,
@@ -257,6 +261,7 @@ export const saveMessage = async (
       ...(kind ? { kind } : {}),
       ...(operations !== undefined ? { operations } : {}),
       ...(warnings !== undefined ? { warnings } : {}),
+      ...(findings !== undefined ? { findings } : {}),
       createdAt: now,
     };
 
@@ -276,6 +281,7 @@ export const saveMessage = async (
       ...(kind ? { kind } : {}),
       ...(operations !== undefined ? { operations } : {}),
       ...(warnings !== undefined ? { warnings } : {}),
+      ...(findings !== undefined ? { findings } : {}),
       createdAt: now,
     };
   } catch (err: any) {
@@ -343,6 +349,7 @@ export const listMessages = async (
       ...(typeof doc.kind === "string" && doc.kind ? { kind: doc.kind } : {}),
       ...(Array.isArray(doc.operations) ? { operations: doc.operations } : {}),
       ...(Array.isArray(doc.warnings) ? { warnings: doc.warnings } : {}),
+      ...(Array.isArray(doc.findings) ? { findings: doc.findings } : {}),
       createdAt: doc.createdAt,
     }));
   } catch (err: any) {
