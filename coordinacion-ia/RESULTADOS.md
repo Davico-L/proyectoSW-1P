@@ -1326,6 +1326,49 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Notas y Observaciones**:
   - Cero modificaciones a UC7, `applyAiOperations.ts`, `operationValidator.ts`, `diagramRoutes.ts`, ruta `ai-edit` ni archivos de proveedores.
 
+### [RES-092] Conversión preventiva createClass->updateClass en editWithFallback (UC7/UC8/CU20) y Diagnóstico de Intención (TAREA B)
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-092
+- **Entregables Producidos**:
+  - `backend/src/ai/providers/operationNormalizer.ts` (**nuevo**):
+    - Exporta `normalizeClassName` y `convertExistingCreateToUpdate` como utilidades puras y neutras, desacopladas del módulo de chat.
+  - `backend/src/providers/operationNormalizer.ts` (**nuevo**):
+    - Reexporta `* from "../ai/providers/operationNormalizer"` para interoperabilidad de rutas.
+  - `backend/src/chat/modificationHelpers.ts` (**modificado**):
+    - Reexporta `normalizeClassName` y `convertExistingCreateToUpdate` desde `../ai/providers/operationNormalizer`, manteniendo intacta la compatibilidad hacia atrás.
+  - `backend/src/ai/providers/providerManager.ts` (**modificado**):
+    - En `editWithFallback`: aplica `convertExistingCreateToUpdate` sobre `result.operations` utilizando `currentModel.classes` antes de construir y devolver `FallbackResult`.
+  - `backend/src/ai/providers/aiProviders.test.ts` (**modificado**):
+    - 7 pruebas agregadas para `editWithFallback`: conversión de `createClass` existente a `updateClass`, conservación de clases nuevas como `createClass`, respeto de `deleteClass` previo, verificación individual con proveedores `local`, `groq`, `gemini` y con fallback activado.
+  - Verificación de rutas de edición y visión:
+    - Se constató que `POST /diagrams/:id/ai-edit` atiende tanto texto (UC7) como voz (UC8) llamando directamente a `editWithFallback`, quedando ambos protegidos contra clases duplicadas.
+    - Se confirmó que UC9 (`ai-from-image`) utiliza `diagramFromImage` y no pasa por `editWithFallback`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores en TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 232/232 pruebas en verde (11 suites del backend).
+- **Notas y Observaciones**:
+  - Cero modificaciones a UC7, UC8, UC9, UC17, `diagramRoutes.ts`, ruta `ai-edit`, `applyAiOperations.ts`, `operationValidator.ts` ni proveedores individuales.
+
+### [RES-093] Ajuste de classifyIntent en CU20 para verbos de modificación no iniciales
+- **Fecha**: 2026-11-08
+- **Tarea Asociada**: TSK-093
+- **Entregables Producidos**:
+  - `backend/src/chat/modificationHelpers.ts` (**modificado**):
+    - Regla 2b en `classifyIntent`: si la oración no tiene signos `?` ni `¿`, no contiene palabras interrogativas ni de explicación en ninguna posición (como palabra completa), y contiene un verbo de modificación de la lista de la regla 2 en las primeras 8 palabras, se clasifica como `"modification"`.
+    - Mantiene intacta la precedencia estricta de las reglas previas (Reglas 1, 1b y 2).
+  - `backend/src/chat/modificationHelpers.test.ts` (**modificado**):
+    - 20 pruebas agregadas para la Regla 2b cubriendo: preposiciones iniciales (`en`, `a`, `sobre`, `para`, `entre`), oraciones con interrogación, palabras interrogativas en cualquier posición, verbos más allá de la palabra 8, y compatibilidad con `detectUnsupportedAttributeRequest`. Total suite: 89 pruebas.
+  - Saneamiento de `operationNormalizer.ts`:
+    - Eliminado el archivo espejo `backend/src/providers/operationNormalizer.ts`.
+    - Se constata la existencia de un único archivo: `backend/src/ai/providers/operationNormalizer.ts`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck`: 0 errores en TypeScript (`tsc --noEmit`).
+  - `npm --prefix backend test`: 236/236 pruebas en verde (11 suites del backend).
+- **Notas y Observaciones**:
+  - Solo se modificaron los archivos permitidos `modificationHelpers.ts` y `modificationHelpers.test.ts`.
+
+
+
 
 
 

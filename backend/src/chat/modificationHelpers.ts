@@ -282,6 +282,44 @@ const MODIFICATION_PREFIXES: readonly string[] = [
   "haz",
 ];
 
+// Palabras o raíces interrogativas y de explicación prohibidas en cualquier posición para Regla 2b
+const NON_INITIAL_QUERY_WORDS: ReadonlySet<string> = new Set([
+  "como",
+  "que",
+  "cual",
+  "cuales",
+  "cuando",
+  "donde",
+  "explica",
+  "explicame",
+  "dime",
+  "diferencia",
+  "diferencias",
+  "diferencian",
+]);
+
+// Verbos de modificación permitidos entre las primeras 8 palabras para Regla 2b
+const NON_INITIAL_MODIFICATION_VERBS: ReadonlySet<string> = new Set([
+  "agregale",
+  "agrega",
+  "anade",
+  "creame",
+  "crea",
+  "elimina",
+  "borra",
+  "quita",
+  "cambia",
+  "modifica",
+  "renombra",
+  "edita",
+  "actualiza",
+  "pon",
+  "relaciona",
+  "conecta",
+  "convierte",
+  "haz",
+]);
+
 function startsWithPrefix(text: string, prefix: string): boolean {
   const regex = new RegExp(`^${prefix}(?:\\b|[\\s.,!?:;]|$)`, "i");
   return regex.test(text);
@@ -293,6 +331,8 @@ function startsWithPrefix(text: string, prefix: string): boolean {
  * 1. Si empieza con palabra interrogativa o de explicación, es "query" (incluso si contiene un verbo de acción).
  * 1b. Si empieza con fórmula de cortesía y la palabra siguiente es verbo de explicación o palabra interrogativa, es "query".
  * 2. Si empieza con fórmula de cortesía o verbo de modificación, es "modification".
+ * 2b. Si el texto no contiene signos "?" ni "¿", no contiene palabras interrogativas ni de explicación en ninguna
+ *     posición, y contiene un verbo de modificación como palabra completa en las primeras 8 palabras, es "modification".
  * 3. Todo lo demás, y el texto vacío, es "query".
  */
 export function classifyIntent(text: string): "query" | "modification" {
@@ -329,6 +369,37 @@ export function classifyIntent(text: string): "query" | "modification" {
   for (const prefix of MODIFICATION_PREFIXES) {
     if (startsWithPrefix(normalized, prefix)) {
       return "modification";
+    }
+  }
+
+  // Regla 2b: Verbo de modificación no inicial (entre las primeras 8 palabras) en frase declarativa/imperativa
+  if (
+    typeof text === "string" &&
+    !text.includes("?") &&
+    !text.includes("¿")
+  ) {
+    const tokens = normalized
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    const hasInterrogativePhrase =
+      /\bpor\s+que\b/u.test(normalized) || /\bpara\s+que\b/u.test(normalized);
+
+    const hasInterrogativeWord =
+      hasInterrogativePhrase ||
+      tokens.some((token) => NON_INITIAL_QUERY_WORDS.has(token));
+
+    if (!hasInterrogativeWord) {
+      const first8 = tokens.slice(0, 8);
+      const hasModificationVerb = first8.some((token) =>
+        NON_INITIAL_MODIFICATION_VERBS.has(token)
+      );
+
+      if (hasModificationVerb) {
+        return "modification";
+      }
     }
   }
 
@@ -495,99 +566,9 @@ export function checkOperationLimit(
   };
 }
 
-/**
- * Normaliza un nombre de clase para comparaciones:
- * - Convierte a minúsculas
- * - Elimina tildes y diacríticos (NFD)
- * - Colapsa espacios en blanco y recorta bordes
- */
-export function normalizeClassName(name: unknown): string {
-  if (typeof name !== "string") {
-    return "";
-  }
-  return name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ");
-}
+export {
+  normalizeClassName,
+  convertExistingCreateToUpdate,
+} from "../ai/providers/operationNormalizer";
 
-/**
- * Convierte operaciones createClass sobre clases ya existentes en updateClass.
- *
- * Cada createClass cuyo className coincida con una clase existente en el diagrama
- * (comparación insensible a mayúsculas, tildes y espacios) se convierte en updateClass
- * con className igual al nombre real de la clase existente, preservando sus atributos y métodos.
- *
- * Excepción: si en el mismo lote hay un deleteClass de esa misma clase ANTES del createClass,
- * se mantiene como createClass.
- */
-export function convertExistingCreateToUpdate(
-  operations: any[],
-  existingClasses: Array<{ className?: string }>
-): any[] {
-  if (!Array.isArray(operations) || operations.length === 0) {
-    return Array.isArray(operations) ? operations : [];
-  }
-  if (!Array.isArray(existingClasses) || existingClasses.length === 0) {
-    return operations;
-  }
-
-  const existingMap = new Map<string, string>();
-  for (const c of existingClasses) {
-    if (c && typeof c.className === "string") {
-      const norm = normalizeClassName(c.className);
-      if (norm && !existingMap.has(norm)) {
-        existingMap.set(norm, c.className);
-      }
-    }
-  }
-
-  const deletedSoFar = new Set<string>();
-  const result: any[] = [];
-
-  for (const op of operations) {
-    if (!op || typeof op !== "object" || !op.action) {
-      result.push(op);
-      continue;
-    }
-
-    if (op.action === "deleteClass" && typeof op.className === "string") {
-      const normDelete = normalizeClassName(op.className);
-      if (normDelete) {
-        deletedSoFar.add(normDelete);
-      }
-      result.push(op);
-      continue;
-    }
-
-    if (op.action === "createClass" && typeof op.className === "string") {
-      const normCreate = normalizeClassName(op.className);
-      const realExistingName = normCreate ? existingMap.get(normCreate) : undefined;
-
-      // Si la clase existe en el diagrama y NO fue eliminada previamente en este lote
-      if (realExistingName && !deletedSoFar.has(normCreate)) {
-        const convertedOp: any = {
-          ...op,
-          action: "updateClass",
-          className: realExistingName,
-        };
-        delete convertedOp.newClassName;
-        if (op.attributes !== undefined) {
-          convertedOp.attributes = op.attributes;
-        }
-        if (op.methods !== undefined) {
-          convertedOp.methods = op.methods;
-        }
-        result.push(convertedOp);
-        continue;
-      }
-    }
-
-    result.push(op);
-  }
-
-  return result;
-}
 

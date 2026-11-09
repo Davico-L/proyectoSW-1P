@@ -6,6 +6,36 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-093
+- **Nombre**: Ajuste de classifyIntent en CU20 para verbos de modificación no iniciales
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `modificationHelpers.ts`, implementar regla intermedia en `classifyIntent` (antes de la regla por defecto y después de las reglas 1, 1b y 2): si el texto original NO contiene signos `?` ni `¿`, NO contiene en ninguna posición una palabra interrogativa o de explicación (`como`, `que`, `por que`, `cual`, `cuales`, `cuando`, `donde`, `para que`, `explica`, `explicame`, `dime`, `diferencia`, `diferencias`), y contiene como palabra completa entre las primeras 8 palabras un verbo de modificación de la lista de la regla 2 (`agrega`, `agregale`, `anade`, `crea`, `creame`, `elimina`, `borra`, `quita`, `cambia`, `modifica`, `renombra`, `edita`, `actualiza`, `pon`, `relaciona`, `conecta`, `convierte`, `haz`), clasificar como `"modification"`.
+  (2) En `modificationHelpers.test.ts`, agregar al menos 15 casos de prueba nuevos cubriendo las frases indicadas y manteniendo en verde todos los casos existentes.
+  (3) Validar que la detección de pedidos no soportados (`detectUnsupportedAttributeRequest`) siga operando idénticamente para estas frases.
+  (4) Validar con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-092
+- **Nombre**: Conversión preventiva createClass->updateClass en editWithFallback (UC7/UC8/CU20) y diagnóstico de intención
+- **Fecha de Inicio**: 2026-11-08
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) TAREA A: Mover `convertExistingCreateToUpdate` y `normalizeClassName` a un módulo neutro en `backend/src/ai/providers/operationNormalizer.ts` (reexportado también desde `backend/src/providers/operationNormalizer.ts`), reexportándolos desde `modificationHelpers.ts` para backward compatibility.
+  (2) Integrar la conversión en `editWithFallback` de `providerManager.ts` sobre `result.operations` antes de devolver `FallbackResult`, usando `currentModel.classes` para saber qué clases existen en el diagrama. Mantener forma de `FallbackResult` y no tocar proveedores individuales.
+  (3) Verificar que `ai-edit` (UC7) y la entrada de voz (UC8) usan `editWithFallback` quedando protegidos de clases duplicadas, y que UC9 no pasa por `editWithFallback`.
+  (4) Suite de pruebas para `editWithFallback` con proveedores simulados (local, groq, gemini, fallback activo, createClass a updateClass, createClass nueva intacta, deleteClass previo respetado).
+  (5) TAREA B: Diagnóstico de la frase del usuario, reglas de `classifyIntent`, comportamiento ante `noChanges`, causa de clasificación como `query` y propuesta de cambio con casos de prueba sin aplicarla.
+  (6) Validación estricta con `npm test` y `npm run typecheck`.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-091
 - **Nombre**: Correcciones de CU20 por fallos del modelo local: conversión preventiva createClass->updateClass y tratamiento de noChanges
 - **Fecha de Inicio**: 2026-11-07

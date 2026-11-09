@@ -622,4 +622,286 @@ describe("CU24 — Selección de proveedores IA y mecanismo de fallback", () => 
       }
     });
   });
+
+  describe("Conversión preventiva createClass -> updateClass en editWithFallback (TAREA A)", () => {
+    const existingModel = {
+      classes: [
+        {
+          className: "Cliente",
+          attributes: [{ name: "id", type: "Integer" }],
+          methods: [],
+        },
+        {
+          className: "Dirección",
+          attributes: [{ name: "calle", type: "String" }],
+          methods: [],
+        },
+      ],
+      relations: [],
+    };
+
+    test("1. Convierte createClass de clase existente en updateClass conservando atributos y métodos", async () => {
+      setActiveProviderId("groq");
+      clearHealthCache();
+      const origKey = process.env.GROQ_API_KEY;
+      process.env.GROQ_API_KEY = "test-key";
+
+      registerProvider({
+        id: "groq",
+        label: "Groq",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            {
+              action: "createClass",
+              className: "Cliente",
+              attributes: [{ name: "email", type: "String", visibility: "public" }],
+              methods: [{ name: "validar", returnType: "Boolean", visibility: "public" }],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "agrega email y validar a Cliente");
+        assert.equal(result.operations.length, 1);
+        assert.equal(result.operations[0].action, "updateClass");
+        assert.equal(result.operations[0].className, "Cliente");
+        assert.deepEqual(result.operations[0].attributes, [
+          { name: "email", type: "String", visibility: "public" },
+        ]);
+        assert.deepEqual(result.operations[0].methods, [
+          { name: "validar", returnType: "Boolean", visibility: "public" },
+        ]);
+      } finally {
+        process.env.GROQ_API_KEY = origKey;
+      }
+    });
+
+    test("2. No toca createClass de clases nuevas (inexistentes en currentModel.classes)", async () => {
+      setActiveProviderId("groq");
+      clearHealthCache();
+      const origKey = process.env.GROQ_API_KEY;
+      process.env.GROQ_API_KEY = "test-key";
+
+      registerProvider({
+        id: "groq",
+        label: "Groq",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            {
+              action: "createClass",
+              className: "Factura",
+              attributes: [{ name: "total", type: "Double" }],
+              methods: [],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "crea Factura");
+        assert.equal(result.operations.length, 1);
+        assert.equal(result.operations[0].action, "createClass");
+        assert.equal(result.operations[0].className, "Factura");
+      } finally {
+        process.env.GROQ_API_KEY = origKey;
+      }
+    });
+
+    test("3. Respeta el deleteClass previo en el mismo lote (se mantiene createClass)", async () => {
+      setActiveProviderId("groq");
+      clearHealthCache();
+      const origKey = process.env.GROQ_API_KEY;
+      process.env.GROQ_API_KEY = "test-key";
+
+      registerProvider({
+        id: "groq",
+        label: "Groq",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            { action: "deleteClass", className: "cliente" },
+            {
+              action: "createClass",
+              className: "Cliente",
+              attributes: [{ name: "id", type: "Integer" }],
+              methods: [],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "recrea Cliente");
+        assert.equal(result.operations.length, 2);
+        assert.equal(result.operations[0].action, "deleteClass");
+        assert.equal(result.operations[1].action, "createClass");
+        assert.equal(result.operations[1].className, "Cliente");
+      } finally {
+        process.env.GROQ_API_KEY = origKey;
+      }
+    });
+
+    test("4. Funciona con proveedor local activo", async () => {
+      setActiveProviderId("local");
+      clearHealthCache();
+      const originalFetch = globalThis.fetch;
+      setLocalConfig({ url: "http://localhost:9999", model: "local-model" });
+
+      (globalThis as any).fetch = async (url: string) => {
+        if (url.includes("/v1/chat/completions")) {
+          return { status: 200 };
+        }
+        return { status: 200 };
+      };
+
+      registerProvider({
+        id: "local",
+        label: "Local",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            {
+              action: "createClass",
+              className: "cliente",
+              attributes: [{ name: "telefono", type: "String" }],
+              methods: [],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "agrega telefono a cliente");
+        assert.equal(result.provider, "local");
+        assert.equal(result.fallback, false);
+        assert.equal(result.operations[0].action, "updateClass");
+        assert.equal(result.operations[0].className, "Cliente");
+      } finally {
+        globalThis.fetch = originalFetch;
+        clearLocalConfig();
+      }
+    });
+
+    test("5. Funciona con proveedor groq activo", async () => {
+      setActiveProviderId("groq");
+      clearHealthCache();
+      const origKey = process.env.GROQ_API_KEY;
+      process.env.GROQ_API_KEY = "test-key";
+
+      registerProvider({
+        id: "groq",
+        label: "Groq",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            {
+              action: "createClass",
+              className: "  DIRECCION  ",
+              attributes: [{ name: "numero", type: "Integer" }],
+              methods: [],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "agrega numero a direccion");
+        assert.equal(result.provider, "groq");
+        assert.equal(result.fallback, false);
+        assert.equal(result.operations[0].action, "updateClass");
+        assert.equal(result.operations[0].className, "Dirección");
+      } finally {
+        process.env.GROQ_API_KEY = origKey;
+      }
+    });
+
+    test("6. Funciona con proveedor gemini activo", async () => {
+      setActiveProviderId("gemini");
+      clearHealthCache();
+      const origKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
+
+      registerProvider({
+        id: "gemini",
+        label: "Gemini",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            {
+              action: "createClass",
+              className: "Cliente",
+              attributes: [{ name: "activo", type: "Boolean" }],
+              methods: [],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "agrega activo a Cliente");
+        assert.equal(result.provider, "gemini");
+        assert.equal(result.fallback, false);
+        assert.equal(result.operations[0].action, "updateClass");
+        assert.equal(result.operations[0].className, "Cliente");
+      } finally {
+        process.env.GEMINI_API_KEY = origKey;
+      }
+    });
+
+    test("7. Funciona con respaldo activado (local falla, groq atiende y convierte)", async () => {
+      setActiveProviderId("local");
+      clearHealthCache();
+      const origKey = process.env.GROQ_API_KEY;
+      process.env.GROQ_API_KEY = "test-key";
+
+      // Mock Local: no configurado
+      registerProvider({
+        id: "local",
+        label: "Local",
+        isConfigured: () => false,
+        editDiagramByInstruction: async () => {
+          throw new Error("Local offline");
+        },
+        chatReply: async () => { throw new Error("Local offline"); },
+      });
+
+      // Mock Groq: configurado y atiende
+      registerProvider({
+        id: "groq",
+        label: "Groq",
+        isConfigured: () => true,
+        editDiagramByInstruction: async () => ({
+          operations: [
+            {
+              action: "createClass",
+              className: "Cliente",
+              attributes: [{ name: "saldo", type: "Double" }],
+              methods: [],
+            },
+          ],
+        }),
+        chatReply: async () => "mock",
+      });
+
+      try {
+        const result = await editWithFallback(existingModel, "agrega saldo a Cliente");
+        assert.equal(result.provider, "groq");
+        assert.equal(result.fallback, true);
+        assert.equal(result.operations[0].action, "updateClass");
+        assert.equal(result.operations[0].className, "Cliente");
+        assert.deepEqual(result.operations[0].attributes, [{ name: "saldo", type: "Double" }]);
+      } finally {
+        process.env.GROQ_API_KEY = origKey;
+      }
+    });
+  });
 });

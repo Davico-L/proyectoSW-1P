@@ -3,6 +3,7 @@ import { groqProvider } from "./groqProvider";
 import { geminiProvider } from "./geminiProvider";
 import { localProvider, getLocalConfig } from "./localProvider";
 import { getProvider } from "./index";
+import { convertExistingCreateToUpdate } from "./operationNormalizer";
 
 export interface FallbackResult {
   operations: any[];
@@ -222,8 +223,13 @@ export async function editWithFallback(
           `[AI-FALLBACK] Consulta atendida por '${providerId}' (fallback: ${isFallback ? "SÍ" : "NO"})`
         );
 
+        const normalizedOperations = convertExistingCreateToUpdate(
+          result.operations,
+          currentModel?.classes || []
+        );
+
         return {
-          operations: result.operations,
+          operations: normalizedOperations,
           provider: providerId,
           fallback: isFallback,
         };

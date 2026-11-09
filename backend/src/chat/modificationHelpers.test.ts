@@ -344,6 +344,105 @@ describe("CU20: modificationHelpers", () => {
         "query"
       );
     });
+
+    // 7. Regla 2b: Verbo de modificación no inicial (máximo primeras 8 palabras) en frase declarativa/imperativa
+    test("Regla 2b: frases con preposición o contexto inicial y verbo de modificación en primeras 8 palabras -> modification", () => {
+      assert.equal(
+        classifyIntent("en Venta agrega una clase DetallesVenta"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("a la clase Pedido agregale el atributo fecha"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("sobre Cliente crea la relación con Factura"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en la clase detalles venta agrega observaciones y monto"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("para la clase Factura crea el atributo total"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en Factura elimina la clase Factura"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en el diagrama cambia el nombre de la clase A a B"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("entre Cliente y Pedido relaciona con asociacion"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en Usuario actualiza el email a String"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en la clase Parqueadero pon el campo tarifa"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en Proveedor elimina el atributo nombre"),
+        "modification"
+      );
+      assert.equal(
+        classifyIntent("en Factura renombra el atributo total a montoTotal"),
+        "modification"
+      );
+    });
+
+    test("Regla 2b: frases con interrogación o palabras interrogativas no son modificación -> query", () => {
+      // Con signo de interrogación al final
+      assert.equal(
+        classifyIntent("en Venta agrega un atributo?"),
+        "query"
+      );
+      // Con signo de apertura y cierre
+      assert.equal(
+        classifyIntent("¿en Venta agrega una clase DetallesVenta?"),
+        "query"
+      );
+      // Con palabra interrogativa en cualquier posición
+      assert.equal(
+        classifyIntent("en qué se diferencian Venta y DetallesVenta"),
+        "query"
+      );
+      assert.equal(
+        classifyIntent("la clase Venta cómo se relaciona con Cliente"),
+        "query"
+      );
+      assert.equal(
+        classifyIntent("en Venta qué atributos debería agregar"),
+        "query"
+      );
+      assert.equal(
+        classifyIntent("en la clase Cliente cuál atributo elimina"),
+        "query"
+      );
+    });
+
+    test("Regla 2b: verbo después de las primeras 8 palabras no califica -> query", () => {
+      assert.equal(
+        classifyIntent("uno dos tres cuatro cinco seis siete ocho nueve agrega"),
+        "query"
+      );
+    });
+
+    test("Regla 2b y detectUnsupportedAttributeRequest: pedidos no soportados se clasifican como modification y detectan el rechazo", () => {
+      const deleteText = "en Proveedor elimina el atributo nombre";
+      assert.equal(classifyIntent(deleteText), "modification");
+      assert.equal(detectUnsupportedAttributeRequest(deleteText), "delete");
+
+      const renameText = "en Factura renombra el atributo total a montoTotal";
+      assert.equal(classifyIntent(renameText), "modification");
+      assert.equal(detectUnsupportedAttributeRequest(renameText), "rename");
+    });
   });
 
   describe("summarizeOperations", () => {
