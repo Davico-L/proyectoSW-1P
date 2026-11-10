@@ -8,6 +8,20 @@ import {
 import { classifyIntent, summarizeOperations } from "./modificationHelpers";
 import { requestDiagramEdit } from "./diagramAiEditService";
 import { reviewDiagramInRoom, ReviewDiagramInRoomDeps } from "./diagramReviewService";
+import { getMongoClient } from "../db/mongo";
+import {
+  getRoomSettings,
+  RoomSettings,
+  DEFAULT_ROOM_SETTINGS,
+} from "./roomSettingsRepository";
+import { buildSystemPrompt } from "./styleFragments";
+
+async function defaultGetRoomSettings(diagramId: string): Promise<RoomSettings> {
+  if (!getMongoClient()) {
+    return { ...DEFAULT_ROOM_SETTINGS };
+  }
+  return getRoomSettings(diagramId);
+}
 
 export class AiBusyError extends Error {
   constructor(
@@ -71,6 +85,7 @@ export interface AiChatServiceDeps {
   requestDiagramEdit?: typeof requestDiagramEdit;
   classifyIntent?: typeof classifyIntent;
   reviewDiagram?: ReviewDiagramInRoomDeps["reviewDiagram"];
+  getRoomSettings?: (diagramId: string) => Promise<RoomSettings>;
 }
 
 export interface AnswerInRoomParams {
@@ -138,6 +153,16 @@ export function createAiChatService(deps: AiChatServiceDeps) {
     return new Promise<AnswerInRoomResult>((resolve, reject) => {
       const executeTask = async () => {
         try {
+          const getSettings = deps.getRoomSettings ?? defaultGetRoomSettings;
+          let settings: RoomSettings;
+          try {
+            settings = await getSettings(params.diagramId);
+          } catch {
+            settings = { ...DEFAULT_ROOM_SETTINGS };
+          }
+          const currentMode = settings?.mode ?? "apply";
+          const currentStyle = settings?.style ?? "mentora";
+
           const classify = deps.classifyIntent ?? classifyIntent;
           const editDiagram = deps.requestDiagramEdit ?? requestDiagramEdit;
 
@@ -193,6 +218,20 @@ export function createAiChatService(deps: AiChatServiceDeps) {
             if (editResult.status === "ready") {
               const validOps = editResult.validOperations || [];
               const warningsList = editResult.warnings || [];
+
+              if (currentMode === "advise") {
+                const summary = summarizeOperations(validOps, warningsList);
+                const cleanSummary = summary.replace(/\.+$/, "");
+                const proposalText = `Propongo: ${cleanSummary}. Para que lo aplique, pon mi modo en «Aplica los cambios» y repite el pedido, o hazlo manualmente.`;
+                const finalMsg = ensureAddressedByName(proposalText, cleanAsker);
+                resolve({
+                  message: finalMsg,
+                  operations: [],
+                  warnings: warningsList,
+                  kind: "answer",
+                });
+                return;
+              }
 
               const ack = await params.onOperations!(validOps, warningsList);
 
@@ -261,6 +300,7 @@ export function createAiChatService(deps: AiChatServiceDeps) {
               {
                 diagramId: params.diagramId,
                 askerName: cleanAsker,
+                style: currentStyle,
               },
               reviewDeps
             );
@@ -298,7 +338,11 @@ export function createAiChatService(deps: AiChatServiceDeps) {
           // Invocar chat
           let rawReply = "";
           try {
-            rawReply = await deps.chat(TEAM_AI_SYSTEM_PROMPT, userContent);
+            const systemPrompt = buildSystemPrompt(
+              TEAM_AI_SYSTEM_PROMPT,
+              currentStyle
+            );
+            rawReply = await deps.chat(systemPrompt, userContent);
           } catch (err: any) {
             throw new AiUnavailableError(
               err?.message || "Error al comunicarse con el proveedor de IA."

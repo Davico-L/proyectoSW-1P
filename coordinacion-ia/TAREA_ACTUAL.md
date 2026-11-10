@@ -6,6 +6,84 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-104
+- **Nombre**: Corrección visual de recorte en panel de configuración de Codia (CU23 Fase 3)
+- **Fecha de Inicio**: 2026-11-09
+- **Estado**: Completada
+- **Objetivo**: En `frontend/`:
+  (1) Diagnosticar la causa del recorte del ~10% del desplegable de configuración de Codia.
+  (2) Implementar posicionamiento robusto en `TeamRoomSettingsSelector.tsx` utilizando React Portal (`createPortal`) y coordenadas fijas calculadas respecto al botón y los límites del panel de chat/viewport (con margen de seguridad de 8 px, max-height y scroll interno).
+  (3) Recalcular posición al abrir y ante eventos de `resize`/`scroll`.
+  (4) Preservar cierre al hacer clic fuera (manejando nodo del portal y contenedor disparador) y con Escape.
+  (5) Ajustar `TeamChat.scss` para soportar el dropdown en portal y modo oscuro.
+  (6) Actualizar o agregar pruebas en `TeamRoomSettingsSelector.test.tsx` y verificar `tsc --noEmit`, `vitest` y `build`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-103
+- **Nombre**: Implementación de CU23 Fase 3 (Frontend: Selector de Configuración de Codia por sala)
+- **Fecha de Inicio**: 2026-11-09
+- **Estado**: Completada
+- **Objetivo**: En `frontend/`:
+  (1) Crear `frontend/src/teamChat/TeamRoomSettingsSelector.tsx` con botón de engranaje (tooltip "Codia") y panel con opciones de Modo ("Aplica los cambios" / "Solo asesora") y Estilo ("Directa" / "Mentora" / "Detallada").
+  (2) Integrar en `TeamChatPanel.tsx` dentro de `.team-chat-header-sub` junto a `TeamModelSelector`.
+  (3) Agregar estilos en `TeamChat.scss` respetando tipografías, colores, bordes y modo oscuro.
+  (4) Crear pruebas unitarias con vitest en `frontend/src/teamChat/TeamRoomSettingsSelector.test.tsx`.
+  (5) Validar con `tsc --noEmit`, `vitest` y `build`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-102
+- **Nombre**: Implementación de CU23 Fase 2B (Integración de configuración en aiChatService y diagramReviewService)
+- **Fecha de Inicio**: 2026-11-09
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `aiChatService.ts`, inyectar y llamar `getRoomSettings(diagramId)` al inicio de `executeTask`.
+  (2) En consulta de CU19, aplicar `buildSystemPrompt(TEAM_AI_SYSTEM_PROMPT, style)`.
+  (3) En revisión de CU21, propagar `style` a `diagramReviewService.ts` y aplicar `buildSystemPrompt(REVIEW_SYSTEM_PROMPT, style)`.
+  (4) En modificación de CU20, si el modo es `"advise"` y el estado es `"ready"`, omitir `onOperations` y responder con mensaje determinista de propuesta: `"Propongo: <summarizeOperations>. Para que lo aplique, pon mi modo en «Aplica los cambios» y repite el pedido, o hazlo manualmente."` sin operaciones.
+  (5) Analizar compatibilidad de tokens en estilo `"detallada"` con proveedores y cobertura de `checkTruncatedResponse`.
+  (6) Crear suite de pruebas exhaustivas en `backend/src/chat/aiChatServiceCu23.test.ts` y agregar a `npm test`.
+  (7) Validar con `typecheck` y suite completa de pruebas.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-101
+- **Nombre**: Implementación de CU23 Fase 2A (Socket: chat-join con settings y evento ai-settings-update)
+- **Fecha de Inicio**: 2026-11-09
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) En `backend/src/socket.ts`, en el ack de `chat-join`, agregar `settings: await getRoomSettings(diagramId)`.
+  (2) Implementar evento `ai-settings-update` con `{ diagramId, mode, style }` y acknowledgement (`{ ok: true, settings }` o `{ ok: false, error }` con errores `not_joined`, `invalid_session`, `invalid_value`, `storage_error`), validación de sesión/sala, resolución de autor desde servidor, no-op si no hay cambios, persistencia con `saveRoomSettings`, emisión de mensaje de sistema a la sala con `formatSettingsAnnouncement`, y difusión de `ai-settings-changed`.
+  (3) Crear pruebas en `backend/src/chat/socketRoomSettingsEvents.test.ts` y agregarlas a `npm test`.
+  (4) Crear `backend/src/scripts/cu23-socket-smoke.ts` y script `"smoke:cu23"` en `package.json`.
+  (5) Validar con `typecheck` y `npm test`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-100
+- **Nombre**: Implementación de CU23 Fase 1 (Repositorio de configuración de sala y fragmentos de estilo)
+- **Fecha de Inicio**: 2026-11-09
+- **Estado**: Completada
+- **Objetivo**: En `backend/`:
+  (1) Crear `backend/src/chat/roomSettingsRepository.ts` con colección `ai_room_settings`, tipos `RoomMode` ("apply" | "advise") y `RoomStyle` ("directa" | "mentora" | "detallada"), validadores `isValidMode` e `isValidStyle`, defaults `{ mode: "apply", style: "mentora" }`, `getRoomSettings` tolerante a fallos, y `saveRoomSettings` con validación cerrada y upsert.
+  (2) Crear `backend/src/chat/styleFragments.ts` con `buildSystemPrompt(basePrompt, style)` devolviendo fragmentos según estilo (mentora = base idéntico).
+  (3) Crear `backend/src/chat/roomSettings.test.ts` con pruebas completas de defaults, validación, upsert idempotente, tolerancia a caída de Mongo y estilos.
+  (4) Agregar la suite al script `test` de `backend/package.json`.
+  (5) Validar con `typecheck` y `npm test`.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-099
 - **Nombre**: Ajuste del prompt de revisión y contenido de usuario (CU21)
 - **Fecha de Inicio**: 2026-11-09

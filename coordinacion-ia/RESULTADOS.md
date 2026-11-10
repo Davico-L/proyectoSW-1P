@@ -1503,6 +1503,105 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Notas y Observaciones**:
   - Se previno el copiado de etiquetas y alucinaciones de dominio en proveedores con menor razonamiento (Groq).
 
+### [RES-100] Implementación de Repositorio y Fragmentos de Estilo (CU23 Fase 1)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-100
+- **Entregables Producidos**:
+  - `backend/src/chat/roomSettingsRepository.ts` (**nuevo**):
+    - Conexión e índices contra MongoDB Atlas en colección `ai_room_settings` con índice único `{ diagramId: 1 }`.
+    - Tipos `RoomMode` ("apply" | "advise") y `RoomStyle` ("directa" | "mentora" | "detallada").
+    - Validadores `isValidMode`, `isValidStyle`.
+    - Mapas `MODE_LABELS` y `STYLE_LABELS`.
+    - `getRoomSettings(diagramId)`: Resuelve configuración de la sala con tolerancia total a fallos de Mongo devolviendo defaults (`mode: "apply"`, `style: "mentora"`).
+    - `saveRoomSettings(diagramId, settings, updatedBy)`: Valida lista cerrada y realiza upsert en MongoDB.
+    - `formatSettingsAnnouncement(updatedBy, oldSettings, newSettings)`: Genera el texto del mensaje `system` de anuncio.
+  - `backend/src/chat/styleFragments.ts` (**nuevo**):
+    - Función pura `buildSystemPrompt(basePrompt, style)` que añade fragmentos de estilo sin mutar los prompts base. "mentora" devuelve el prompt base idéntico.
+  - `backend/src/chat/roomSettings.test.ts` (**nuevo**):
+    - 6 pruebas unitarias completas agregadas a `npm test`.
+
+### [RES-101] Socket.IO chat-join con Settings y ai-settings-update (CU23 Fase 2A)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-101
+- **Entregables Producidos**:
+  - `backend/src/socket.ts` (**modificado**):
+    - Inclusión de `settings: await getRoomSettings(diagramId)` en ack de `chat-join`.
+    - Evento `ai-settings-update` con validación de sesión/sala, resolución de autor en backend, rechazo de no-op, persistencia, emisión de mensaje de sistema a la sala y difusión de `ai-settings-changed`.
+  - `backend/src/chat/socketRoomSettingsEvents.test.ts` (**nuevo**):
+    - 7 pruebas unitarias de integración de eventos Socket.IO añadidas a `npm test`.
+  - `backend/src/scripts/cu23-socket-smoke.ts` (**nuevo**) y script `"smoke:cu23"` en `backend/package.json`.
+
+### [RES-102] Integración de Configuración por Sala en aiChatService y diagramReviewService (CU23 Fase 2B)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-102
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - Inyección de `deps.getRoomSettings`.
+    - Lectura en tiempo de ejecución en `executeTask` al comenzar a procesar la consulta.
+    - Aplicación de `buildSystemPrompt(TEAM_AI_SYSTEM_PROMPT, style)` en consultas de CU19.
+    - Modo "advise" en modificación de CU20: omite `onOperations`/`ai-operations` y responde con mensaje determinista de propuesta ante estado "ready". Mantiene respuestas idénticas de CU20 para `onlyWarnings`, `noChanges`, `tooMany`, `diagramNotFound`.
+  - `backend/src/chat/diagramReviewService.ts` (**modificado**):
+    - Inyección de `style` y enriquecimiento del prompt de revisión con `buildSystemPrompt(REVIEW_SYSTEM_PROMPT, params.style)`.
+  - `backend/src/chat/aiChatServiceCu23.test.ts` (**nuevo**):
+    - 7 pruebas unitarias de servicio añadidas a `npm test`.
+- **Verificación Realizada**:
+  - Suite completa del backend: 332/332 pruebas pasadas (17 suites).
+
+### [RES-103] Frontend Selector de Configuración de Codia por Sala (CU23 Fase 3)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-103
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/TeamRoomSettingsSelector.tsx` (**nuevo**):
+    - Botón disparador con icono de engranaje (tooltip/title "Codia", `aria-label="Codia"`, `aria-expanded`, `aria-haspopup="dialog"`).
+    - Deshabilitado automáticamente cuando el chat no está conectado, unido o sin `diagramId`.
+    - Carga de estado inicial desde ack de `chat-join` con fallback a defaults (`apply` / `mentora`).
+    - Panel emergente con 2 grupos de opciones ("Modo": "Aplica los cambios" / "Solo asesora"; "Estilo": "Directa" / "Mentora" / "Detallada").
+    - Selección inmediata con emisión de `ai-settings-update`; deshabilita controles mientras espera el ack sin cambiar el valor visual hasta confirmación.
+    - Sincronización reactiva en tiempo real al escuchar `ai-settings-changed` filtrado por `diagramId` (con limpieza al desmontar).
+    - Banner de error accesible ante rechazo del ack ("No se pudo guardar la configuración"), preservando opciones activas previas.
+    - Cierre automático al hacer clic fuera, pulsar Escape o desmontar el componente.
+  - `frontend/src/teamChat/TeamChatPanel.tsx` (**modificado**):
+    - Integración de `<TeamRoomSettingsSelector>` en `.team-chat-header-model-slot` dentro de `.team-chat-header-sub`, contiguo a `<TeamModelSelector>`.
+  - `frontend/src/teamChat/TeamChat.scss` (**modificado**):
+    - Estilos visuales acordes a `TeamModelSelector` (mismas tipografías, bordes, sombras, radio indicators, espaciados).
+    - Ajuste de espaciado en cabecera (`gap: 6px`) y alineación derecha sin desborde (`right: 0`, 240px, `max-width: calc(100vw - 32px)`).
+    - Reglas completas para modo oscuro (`.theme--dark, [data-theme="dark"]`).
+  - `frontend/src/teamChat/TeamRoomSettingsSelector.test.tsx` (**nuevo**):
+    - 7 pruebas unitarias con Vitest y `@testing-library/react`.
+- **Verificación Realizada**:
+  - `cd frontend; npx vitest run src/teamChat`: 56/56 pruebas en verde (4 suites, 100% de éxito).
+  - `cd frontend; npx tsc --noEmit`: 0 errores de TypeScript.
+  - `cd frontend; yarn --cwd ./excalidraw-app build`: Compilación de producción exitosa.
+  - `cd backend; npm test`: 332/332 pruebas pasadas (17 suites, 0 regresiones).
+- **Notas y Observaciones**:
+  - No se modificó ningún archivo fuera de los autorizados (`TeamModelSelector.tsx`, panel de IA personal y lienzo de diagramas permanecieron intactos).
+
+### [RES-104] Corrección Visual de Recorte en Panel de Configuración de Codia (CU23)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-104
+- **Diagnóstico de Causa Raíz**:
+  - **Lado cortado**: Borde izquierdo (~10%, aprox. 20-25 px).
+  - **Contenedor ancestro que recorta**: `.team-chat-panel` tiene `overflow: hidden` y ancho fijo de 360 px. Al posicionar el desplegable con `position: absolute; right: 0;` relativo al botón de engranaje (ubicado a la izquierda del selector de modelo), el desplegable de 240 px de ancho se extendía hacia la izquierda más allá del límite x = 0 del panel de chat (x = -13 px a -20 px), siendo recortado por el `overflow: hidden` del panel contenedor.
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/TeamRoomSettingsSelector.tsx` (**modificado**):
+    - Implementación de `createPortal(..., document.body)` para renderizar el panel emergente directamente en el body, eliminando por completo cualquier recorte por ancestros con `overflow: hidden`.
+    - Cálculo de posicionamiento dinámico `fixed` (`top`, `left`, `maxHeight`) calculado a partir de `getBoundingClientRect()` del botón y acotado por los límites del panel de chat (`.team-chat-panel`) y del viewport con margen de seguridad de 8 px.
+    - Recalculo automático de posición al abrir el panel y ante eventos de `resize` y `scroll` de ventana.
+    - Cierre por clic fuera adaptado para React Portal (comprueba tanto `buttonRef` como `dropdownRef`), evitando cierres accidentales al interactuar dentro del panel.
+    - Detección reactiva de tema oscuro (`theme--dark`) propagada al contenedor del portal.
+  - `frontend/src/teamChat/TeamChat.scss` (**modificado**):
+    - Extracción de `.team-room-settings-dropdown` como selector de nivel superior con `position: fixed`, `z-index: 10000`, `box-sizing: border-box`, `overflow-y: auto` y scrollbar estilizado.
+    - Reglas completas para modo oscuro tanto vía cascada de `[data-theme="dark"]` / `.theme--dark` como clase directa en el portal.
+  - `frontend/src/teamChat/TeamRoomSettingsSelector.test.tsx` (**modificado**):
+    - Añadida prueba específica de verificación de Portal en `document.body`, `position: fixed`, prevención de cierre al hacer clic dentro y cierre al hacer clic fuera.
+- **Verificación Realizada**:
+  - `cd frontend; npx vitest run src/teamChat`: 57/57 pruebas pasadas (4 suites, 100% éxito).
+  - `cd frontend; npx tsc --noEmit`: 0 errores.
+  - `cd frontend; yarn --cwd ./excalidraw-app build`: Compilación y empaquetado de producción exitoso.
+  - `cd backend; npm test`: 332/332 pruebas pasadas (17 suites, 0 regresiones).
+- **Notas y Observaciones**:
+  - No se modificó ningún archivo fuera de los autorizados (`TeamRoomSettingsSelector.tsx`, `TeamChat.scss` y prueba unitaria).
+
 
 
 

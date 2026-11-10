@@ -6,6 +6,7 @@ import {
 } from "./mentionHelper";
 import { renderAiFormattedText } from "./aiTextFormatter";
 import { TeamModelSelector } from "./TeamModelSelector";
+import { TeamRoomSettingsSelector } from "./TeamRoomSettingsSelector";
 import { socket } from "../../excalidraw-app/data/realtimeSync";
 import { getActiveDiagramId } from "../../excalidraw-app/data/backendSync";
 import "./TeamChat.scss";
@@ -329,11 +330,16 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
             {connectionStatus.label}
           </span>
 
-          {/* Selector de modelo de IA del equipo */}
+          {/* Selector de modelo de IA del equipo y ajustes de Codia */}
           <div
             className="team-chat-header-model-slot"
             id="team-chat-model-selector-slot"
           >
+            <TeamRoomSettingsSelector
+              diagramId={activeDiagramId}
+              isConnected={isConnected}
+              isJoined={isJoined}
+            />
             <TeamModelSelector backendUrl={backendUrl} />
           </div>
         </div>

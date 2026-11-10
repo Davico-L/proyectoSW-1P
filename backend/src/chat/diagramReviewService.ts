@@ -25,6 +25,8 @@ import {
 } from "./aiChatHelpers";
 import { AiUnavailableError } from "./aiChatService";
 import { chatWithFallback } from "../ai/providers/providerManager";
+import { RoomStyle } from "./roomSettingsRepository";
+import { buildSystemPrompt } from "./styleFragments";
 
 // ---------------------------------------------------------------------------
 // Prompt de sistema para la revisión (CU21)
@@ -49,6 +51,7 @@ export const REVIEW_SYSTEM_PROMPT =
 export interface ReviewDiagramParams {
   diagramId: string;
   askerName: string;
+  style?: RoomStyle;
 }
 
 export interface ReviewDiagramResult {
@@ -164,7 +167,8 @@ export async function reviewDiagramInRoom(
 
   let rawReply = "";
   try {
-    rawReply = await chatFn(REVIEW_SYSTEM_PROMPT, userContent);
+    const systemPrompt = buildSystemPrompt(REVIEW_SYSTEM_PROMPT, params.style);
+    rawReply = await chatFn(systemPrompt, userContent);
   } catch (err: any) {
     // Todos los proveedores fallaron → fallback de texto plano
     return {

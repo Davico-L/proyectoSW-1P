@@ -21,6 +21,15 @@ import {
 } from "./chat/aiChatHelpers";
 import { chatWithFallback } from "./ai/providers/providerManager";
 import { extractUmlModel } from "./backendGenerator/extractModel";
+import {
+  getRoomSettings,
+  saveRoomSettings,
+  isValidMode,
+  isValidStyle,
+  formatSettingsAnnouncement,
+  RoomSettings,
+  SavedRoomSettings,
+} from "./chat/roomSettingsRepository";
 
 export const CODIA_ACK_TIMEOUT_MS = parseInt(
   process.env.CODIA_ACK_TIMEOUT_MS || "15000",
@@ -153,7 +162,7 @@ export const initSocket = (
       "chat-join",
       async (
         payload: { diagramId?: string; sessionId?: string },
-        callback?: (res: { ok: boolean; error?: string }) => void
+        callback?: (res: { ok: boolean; error?: string; settings?: RoomSettings }) => void
       ) => {
         try {
           const diagramId =
@@ -206,8 +215,16 @@ export const initSocket = (
             `[Socket] Socket ${socket.id} unido al chat del diagrama ${diagramId} como '${resolvedAuthorName}'`
           );
 
+          const roomSettings = await getRoomSettings(diagramId);
+
           if (typeof callback === "function") {
-            callback({ ok: true });
+            callback({
+              ok: true,
+              settings: {
+                mode: roomSettings.mode,
+                style: roomSettings.style,
+              },
+            });
           }
         } catch (err: any) {
           console.error(
@@ -466,6 +483,147 @@ export const initSocket = (
           );
           if (typeof callback === "function") {
             callback({ ok: false, error: "unavailable" });
+          }
+        }
+      }
+    );
+
+    // Evento ai-settings-update (CU23): actualiza la configuración de modo y estilo de Codia para la sala
+    socket.on(
+      "ai-settings-update",
+      async (
+        payload: { diagramId?: string; mode?: any; style?: any },
+        callback?: (res: {
+          ok: boolean;
+          settings?: RoomSettings;
+          error?: string;
+        }) => void
+      ) => {
+        try {
+          const diagramId =
+            typeof payload?.diagramId === "string" ? payload.diagramId.trim() : "";
+          const joinedDiagramId = socket.data?.diagramId;
+          const authorSessionId = socket.data?.sessionId;
+          const authorName = socket.data?.authorName;
+
+          // 1. Exigir que haya hecho chat-join para ese mismo diagramId y que siga en la sala
+          if (
+            !diagramId ||
+            !joinedDiagramId ||
+            diagramId !== joinedDiagramId ||
+            !authorSessionId ||
+            !authorName ||
+            !socket.rooms.has(diagramId)
+          ) {
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "not_joined" });
+            }
+            return;
+          }
+
+          // 2. Comprobar sesión contra Postgres con sessionExists
+          const validSession = await sessionExists(authorSessionId);
+          if (!validSession) {
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "invalid_session" });
+            }
+            return;
+          }
+
+          // 3. Validar contra la lista cerrada
+          if (!isValidMode(payload?.mode) || !isValidStyle(payload?.style)) {
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "invalid_value" });
+            }
+            return;
+          }
+
+          const targetMode = payload.mode;
+          const targetStyle = payload.style;
+
+          // 4. Si los valores son iguales a los vigentes: responde ok sin guardar mensaje ni emitir evento
+          const current = await getRoomSettings(diagramId);
+          const modeChanged = current.mode !== targetMode;
+          const styleChanged = current.style !== targetStyle;
+
+          if (!modeChanged && !styleChanged) {
+            if (typeof callback === "function") {
+              callback({
+                ok: true,
+                settings: { mode: current.mode, style: current.style },
+              });
+            }
+            return;
+          }
+
+          // 5. Guardar en Mongo y mensaje de sistema; si falla, responde storage_error y no emite nada
+          let saved: SavedRoomSettings;
+          let systemDoc: any;
+
+          try {
+            saved = await saveRoomSettings(
+              diagramId,
+              { mode: targetMode, style: targetStyle },
+              authorName
+            );
+
+            const announcementText = formatSettingsAnnouncement(
+              authorName,
+              modeChanged,
+              targetMode,
+              styleChanged,
+              targetStyle
+            );
+
+            systemDoc = await saveMessage({
+              diagramId,
+              authorSessionId: "system",
+              authorName: "Sistema",
+              role: "system",
+              text: announcementText,
+            });
+          } catch (err: any) {
+            if (err?.message === "invalid_value") {
+              if (typeof callback === "function") {
+                callback({ ok: false, error: "invalid_value" });
+              }
+              return;
+            }
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "storage_error" });
+            }
+            return;
+          }
+
+          // 6. Si guardó bien: emitir mensaje de sistema y evento ai-settings-changed
+          io.to(diagramId).emit(
+            "chat-message",
+            toPublicChatMessage(systemDoc)
+          );
+
+          io.to(diagramId).emit("ai-settings-changed", {
+            diagramId,
+            mode: saved.mode,
+            style: saved.style,
+            updatedBy: saved.updatedBy,
+          });
+
+          if (typeof callback === "function") {
+            callback({
+              ok: true,
+              settings: {
+                mode: saved.mode,
+                style: saved.style,
+              },
+            });
+          }
+        } catch (err: any) {
+          console.error(
+            `[Socket] Error inesperado en ai-settings-update (${socket.id}):`,
+            err?.message || err
+          );
+          if (typeof callback === "function") {
+            callback({ ok: false, error: "storage_error" });
           }
         }
       }
