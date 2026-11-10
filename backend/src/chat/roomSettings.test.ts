@@ -9,6 +9,8 @@ import {
   DEFAULT_ROOM_SETTINGS,
   RoomMode,
   RoomStyle,
+  MODE_LABELS,
+  formatSettingsAnnouncement,
 } from "./roomSettingsRepository";
 import {
   buildSystemPrompt,
@@ -52,6 +54,7 @@ describe("CU23 - Configuración de Codia por sala y fragmentos de estilo", () =>
   test("1. Funciones auxiliares isValidMode e isValidStyle validan listas cerradas", () => {
     assert.equal(isValidMode("apply"), true);
     assert.equal(isValidMode("advise"), true);
+    assert.equal(isValidMode("approval"), true);
     assert.equal(isValidMode("invalid"), false);
     assert.equal(isValidMode(""), false);
     assert.equal(isValidMode(null), false);
@@ -253,5 +256,73 @@ describe("CU23 - Configuración de Codia por sala y fragmentos de estilo", () =>
     const reviewDirecta = buildSystemPrompt(baseReview, "directa");
     assert.ok(reviewDirecta.startsWith(baseReview));
     assert.ok(reviewDirecta.includes(DIRECTA_STYLE_FRAGMENT));
+  });
+
+  test("7. CU22 - Tercer modo 'approval' con etiqueta 'Pide aprobación'", async () => {
+    // 7.1 Validación de tipos y constantes
+    assert.equal(isValidMode("approval"), true);
+    assert.equal(isValidMode("auto"), false);
+    assert.equal(isValidMode("reject"), false);
+    assert.equal(MODE_LABELS.approval, "Pide aprobación");
+
+    // 7.2 formatSettingsAnnouncement usa la nueva etiqueta 'Pide aprobación'
+    const announcementModeOnly = formatSettingsAnnouncement(
+      "Laura",
+      true,
+      "approval",
+      false,
+      "mentora"
+    );
+    assert.equal(
+      announcementModeOnly,
+      "Laura cambió el modo de Codia a 'Pide aprobación'"
+    );
+
+    const announcementBoth = formatSettingsAnnouncement(
+      "Laura",
+      true,
+      "approval",
+      true,
+      "directa"
+    );
+    assert.equal(
+      announcementBoth,
+      "Laura cambió el modo de Codia a 'Pide aprobación'. Laura cambió el estilo de Codia a 'Directa'"
+    );
+
+    // 7.3 Guardado y persistencia en MongoDB
+    const diagId = createDiagramId("approval-mode");
+    const saved = await saveRoomSettings(
+      diagId,
+      { mode: "approval", style: "detallada" },
+      "Laura"
+    );
+
+    assert.deepEqual(saved, {
+      mode: "approval",
+      style: "detallada",
+      updatedBy: "Laura",
+    });
+
+    const read = await getRoomSettings(diagId);
+    assert.deepEqual(read, {
+      mode: "approval",
+      style: "detallada",
+    });
+
+    // 7.4 Rechazo de valores inválidos en saveRoomSettings
+    await assert.rejects(
+      async () => {
+        await saveRoomSettings(
+          diagId,
+          { mode: "auto" as any, style: "mentora" },
+          "Laura"
+        );
+      },
+      (err: any) => {
+        assert.equal(err?.message, "invalid_value");
+        return true;
+      }
+    );
   });
 });

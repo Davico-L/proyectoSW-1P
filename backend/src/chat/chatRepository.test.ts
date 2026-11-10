@@ -4,11 +4,15 @@ import {
   saveMessage,
   listMessages,
   toPublicChatMessage,
+  getMessageById,
+  claimProposal,
+  settleProposal,
   ChatValidationError,
   ChatUnavailableError,
   CHAT_COLLECTION_NAME,
 } from "./chatRepository";
 import { AI_DISPLAY_NAME } from "./aiChatHelpers";
+import { createProposal } from "./proposalHelpers";
 import { getMongoDb, closeMongoConnection, checkMongoConnection } from "../db/mongo";
 
 describe("Repositorio de Mensajes de Chat (chat_messages)", () => {
@@ -390,5 +394,337 @@ describe("Repositorio de Mensajes de Chat (chat_messages)", () => {
     assert.equal(validAiDoc.role, "ai");
     assert.equal(validAiDoc.authorSessionId, "ai");
     assert.equal(validAiDoc.authorName, AI_DISPLAY_NAME);
+  });
+
+  describe("10. CU22 - Gestión y ciclo de vida de propuestas en chatRepository", () => {
+    test("10.1 getMessageById devuelve el documento completo (con operations) o null ante id inválido o inexistente", async () => {
+      const diagId = createDiagramId("get-msg-by-id");
+
+      const saved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Mensaje con propuesta y operaciones",
+        proposal: createProposal({
+          summary: ["Crear clase Factura"],
+          requestedBy: "Ana",
+        }),
+        operations: [{ action: "addClass", name: "Factura" }],
+      });
+
+      // Búsqueda exitosa
+      const retrieved = await getMessageById(diagId, saved.id);
+      assert.ok(retrieved);
+      assert.equal(retrieved.id, saved.id);
+      assert.equal(retrieved.diagramId, diagId);
+      assert.equal(retrieved.text, "Mensaje con propuesta y operaciones");
+      assert.deepEqual(retrieved.operations, [{ action: "addClass", name: "Factura" }]);
+      assert.equal(retrieved.proposal.status, "pending");
+
+      // Búsqueda con id inexistente
+      const nonExistent = await getMessageById(diagId, "507f1f77bcf86cd799439011");
+      assert.equal(nonExistent, null);
+
+      // Búsqueda con id inválido
+      const invalidId = await getMessageById(diagId, "id-invalido-no-hex");
+      assert.equal(invalidId, null);
+
+      const emptyId = await getMessageById(diagId, "   ");
+      assert.equal(emptyId, null);
+
+      // Búsqueda en otro diagrama
+      const wrongDiagram = await getMessageById("otro-diagrama", saved.id);
+      assert.equal(wrongDiagram, null);
+    });
+
+    test("10.2 Reclamo exitoso: pone status 'applying', applyingAt, y devuelve message con operations", async () => {
+      const diagId = createDiagramId("claim-success");
+
+      const saved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Propuesta para reclamar",
+        proposal: createProposal({
+          summary: ["Crear clase Factura", "Agregar atributo monto"],
+          requestedBy: "Carlos",
+        }),
+        operations: [
+          { action: "addClass", name: "Factura" },
+          { action: "addAttribute", className: "Factura", name: "monto" },
+        ],
+      });
+
+      const res = await claimProposal(diagId, saved.id, "Carlos");
+
+      assert.equal(res.ok, true);
+      if (res.ok) {
+        assert.equal(res.message.id, saved.id);
+        assert.equal(res.message.proposal.status, "applying");
+        assert.ok(res.message.proposal.applyingAt instanceof Date);
+        assert.deepEqual(res.message.operations, [
+          { action: "addClass", name: "Factura" },
+          { action: "addAttribute", className: "Factura", name: "monto" },
+        ]);
+      }
+    });
+
+    test("10.3 Doble reclamo inmediato: el segundo falla con reason 'already_decided' y proposal pública vigente", async () => {
+      const diagId = createDiagramId("double-claim");
+
+      const saved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Propuesta para doble reclamo",
+        proposal: createProposal({
+          summary: ["Crear clase Producto"],
+          requestedBy: "Ana",
+        }),
+      });
+
+      // Primer reclamo
+      const res1 = await claimProposal(diagId, saved.id, "Carlos");
+      assert.equal(res1.ok, true);
+
+      // Segundo reclamo concurrente o inmediato
+      const res2 = await claimProposal(diagId, saved.id, "Beatriz");
+      assert.equal(res2.ok, false);
+      if (!res2.ok) {
+        assert.equal(res2.reason, "already_decided");
+        assert.ok(res2.proposal);
+        // La versión pública vigente de "applying" se muestra como "pending"
+        assert.equal(res2.proposal.status, "pending");
+        assert.deepEqual(res2.proposal.summary, ["Crear clase Producto"]);
+      }
+    });
+
+    test("10.4 Reclamo tras 60 segundos de applying (timeout/desconexión previa)", async () => {
+      const diagId = createDiagramId("claim-timeout-60s");
+
+      const saved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Propuesta con aplicando expirado",
+        proposal: createProposal({
+          summary: ["Crear clase Pago"],
+          requestedBy: "Elena",
+        }),
+      });
+
+      // Simulamos que el reclamo previo ocurrió hace 70 segundos
+      const db = await getMongoDb();
+      assert.ok(db);
+      const seventySecondsAgo = new Date(Date.now() - 70 * 1000);
+      const { ObjectId } = await import("mongodb");
+      await db.collection(CHAT_COLLECTION_NAME).updateOne(
+        { _id: new ObjectId(saved.id) },
+        {
+          $set: {
+            "proposal.status": "applying",
+            "proposal.applyingAt": seventySecondsAgo,
+          },
+        }
+      );
+
+      // Nuevo reclamo por otro integrante
+      const res = await claimProposal(diagId, saved.id, "Laura");
+      assert.equal(res.ok, true);
+      if (res.ok) {
+        assert.equal(res.message.proposal.status, "applying");
+        assert.ok(
+          res.message.proposal.applyingAt.getTime() > Date.now() - 5000,
+          "applyingAt debe ser reciente"
+        );
+      }
+    });
+
+    test("10.5 settleProposal liquida cada resultado (approved, rejected, expired)", async () => {
+      const diagId = createDiagramId("settle-outcomes");
+
+      // A) Liquidación con "approved"
+      const msgApproved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Para aprobar",
+        proposal: createProposal({ summary: ["Aprobar cambio"], requestedBy: "Ana" }),
+      });
+      await claimProposal(diagId, msgApproved.id, "Ana");
+
+      const settledApproved = await settleProposal(
+        diagId,
+        msgApproved.id,
+        "approved",
+        "Carlos"
+      );
+      assert.ok(settledApproved);
+      assert.equal(settledApproved.proposal.status, "approved");
+      assert.equal(settledApproved.proposal.decidedBy, "Carlos");
+      assert.ok(settledApproved.proposal.decidedAt instanceof Date);
+      assert.equal(settledApproved.proposal.applyingAt, undefined);
+
+      // Re-intento de liquidar ya no actúa porque no está en "applying"
+      const secondSettle = await settleProposal(diagId, msgApproved.id, "approved");
+      assert.equal(secondSettle, null);
+
+      // B) Liquidación con "rejected"
+      const msgRejected = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Para rechazar",
+        proposal: createProposal({ summary: ["Rechazar cambio"], requestedBy: "Beto" }),
+      });
+      await claimProposal(diagId, msgRejected.id, "Beto");
+
+      const settledRejected = await settleProposal(
+        diagId,
+        msgRejected.id,
+        "rejected",
+        "Diego"
+      );
+      assert.ok(settledRejected);
+      assert.equal(settledRejected.proposal.status, "rejected");
+      assert.equal(settledRejected.proposal.decidedBy, "Diego");
+      assert.ok(settledRejected.proposal.decidedAt instanceof Date);
+
+      // C) Liquidación con "expired"
+      const msgExpired = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Para expirar",
+        proposal: createProposal({ summary: ["Expirar cambio"], requestedBy: "Elena" }),
+      });
+      await claimProposal(diagId, msgExpired.id, "Elena");
+
+      const settledExpired = await settleProposal(
+        diagId,
+        msgExpired.id,
+        "expired"
+      );
+      assert.ok(settledExpired);
+      assert.equal(settledExpired.proposal.status, "expired");
+      assert.ok(settledExpired.proposal.decidedAt instanceof Date);
+    });
+
+    test("10.6 settleProposal con 'pending' retira applyingAt y permite volver a reclamar", async () => {
+      const diagId = createDiagramId("settle-revert-pending");
+
+      const saved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Propuesta para revertir a pending",
+        proposal: createProposal({ summary: ["Cambio pendiente"], requestedBy: "Ana" }),
+      });
+
+      // 1. Reclamo inicial
+      const claim1 = await claimProposal(diagId, saved.id, "Ana");
+      assert.equal(claim1.ok, true);
+
+      // 2. Reversión a pending (p. ej. error en cliente antes de aplicar)
+      const reverted = await settleProposal(diagId, saved.id, "pending");
+      assert.ok(reverted);
+      assert.equal(reverted.proposal.status, "pending");
+      assert.equal(reverted.proposal.applyingAt, undefined);
+
+      // 3. Se puede volver a reclamar con éxito
+      const claim2 = await claimProposal(diagId, saved.id, "Carlos");
+      assert.equal(claim2.ok, true);
+      if (claim2.ok) {
+        assert.equal(claim2.message.proposal.status, "applying");
+      }
+    });
+
+    test("10.7 claimProposal y settleProposal ante id inexistente o inválido", async () => {
+      const diagId = createDiagramId("not-found-checks");
+
+      // claimProposal
+      const claimInvalid = await claimProposal(diagId, "id-invalido", "Tester");
+      assert.equal(claimInvalid.ok, false);
+      if (!claimInvalid.ok) assert.equal(claimInvalid.reason, "not_found");
+
+      const claimNonExistent = await claimProposal(
+        diagId,
+        "507f1f77bcf86cd799439011",
+        "Tester"
+      );
+      assert.equal(claimNonExistent.ok, false);
+      if (!claimNonExistent.ok) assert.equal(claimNonExistent.reason, "not_found");
+
+      // settleProposal
+      const settleInvalid = await settleProposal(diagId, "id-invalido", "approved");
+      assert.equal(settleInvalid, null);
+
+      const settleNonExistent = await settleProposal(
+        diagId,
+        "507f1f77bcf86cd799439011",
+        "approved"
+      );
+      assert.equal(settleNonExistent, null);
+    });
+
+    test("10.8 operations nunca sale a los clientes y toPublicChatMessage pasa proposal por toPublicProposal", async () => {
+      const diagId = createDiagramId("operations-security-check");
+
+      const saved = await saveMessage({
+        diagramId: diagId,
+        authorSessionId: "ai",
+        authorName: AI_DISPLAY_NAME,
+        role: "ai",
+        text: "Propuesta de seguridad",
+        proposal: createProposal({
+          summary: ["Crear clase Secreta"],
+          requestedBy: "Admin",
+        }),
+        operations: [{ action: "addClass", name: "Secreta" }],
+        warnings: ["Advertencia interna"],
+      });
+
+      // Reclamo -> estado interno applying
+      const claimRes = await claimProposal(diagId, saved.id, "Admin");
+      assert.equal(claimRes.ok, true);
+
+      if (claimRes.ok) {
+        // En el objeto interno message, operations sí existe
+        assert.ok(claimRes.message.operations);
+
+        // Al pasar por toPublicChatMessage:
+        const publicMessage = toPublicChatMessage(claimRes.message);
+
+        // operations, warnings y authorSessionId NO deben existir
+        assert.equal((publicMessage as any).operations, undefined);
+        assert.equal((publicMessage as any).warnings, undefined);
+        assert.equal((publicMessage as any).authorSessionId, undefined);
+        assert.equal("operations" in publicMessage, false);
+        assert.equal("warnings" in publicMessage, false);
+
+        // proposal fue procesada con toPublicProposal: 'applying' se ve como 'pending'
+        assert.ok(publicMessage.proposal);
+        assert.equal(publicMessage.proposal.status, "pending");
+        assert.deepEqual(publicMessage.proposal.summary, ["Crear clase Secreta"]);
+        assert.equal((publicMessage.proposal as any).operations, undefined);
+      }
+
+      // Verificación en listMessages:
+      const listed = await listMessages(diagId);
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0].proposal.status, "applying"); // Interno refleja estado vigente
+      // Al sanitizar para la salida pública (como hace el endpoint GET /chat):
+      const publicListed = listed.map(toPublicChatMessage);
+      assert.equal("operations" in publicListed[0], false);
+      assert.equal(publicListed[0].proposal.status, "pending");
+    });
   });
 });

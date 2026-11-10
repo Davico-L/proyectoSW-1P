@@ -2,13 +2,22 @@ import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
 import { getDiagramById } from "./services/diagramService";
 import { getSession, sessionExists } from "./services/sessionService";
+import { ObjectId } from "mongodb";
+import { getMongoDb } from "./db/mongo";
 import {
   saveMessage,
   listMessages,
   toPublicChatMessage,
+  claimProposal,
+  settleProposal,
+  CHAT_COLLECTION_NAME,
   ChatValidationError,
   ChatUnavailableError,
 } from "./chat/chatRepository";
+import {
+  toPublicProposal,
+  PublicProposal,
+} from "./chat/proposalHelpers";
 import {
   createAiChatService,
   AiBusyError,
@@ -21,6 +30,7 @@ import {
 } from "./chat/aiChatHelpers";
 import { chatWithFallback } from "./ai/providers/providerManager";
 import { extractUmlModel } from "./backendGenerator/extractModel";
+import { validateAndResolveOperations } from "./services/operationValidator";
 import {
   getRoomSettings,
   saveRoomSettings,
@@ -387,6 +397,7 @@ export const initSocket = (
                     operations: result.operations,
                     warnings: result.warnings,
                     findings: result.findings,
+                    proposal: result.proposal,
                   });
 
                   io.to(targetDiagramId).emit(
@@ -622,6 +633,345 @@ export const initSocket = (
             `[Socket] Error inesperado en ai-settings-update (${socket.id}):`,
             err?.message || err
           );
+          if (typeof callback === "function") {
+            callback({ ok: false, error: "storage_error" });
+          }
+        }
+      }
+    );
+
+    // Evento proposal-decision (CU22): aprobación o rechazo de propuestas de Codia
+    socket.on(
+      "proposal-decision",
+      async (
+        payload: {
+          diagramId?: string;
+          proposalId?: string;
+          decision?: "approve" | "reject";
+        },
+        callback?: (res: {
+          ok: boolean;
+          error?: string;
+          proposal?: PublicProposal;
+        }) => void
+      ) => {
+        let hasClaimed = false;
+        let diagramId = "";
+        let targetMessageId = "";
+
+        try {
+          const joinedDiagramId = socket.data?.diagramId;
+          const authorSessionId = socket.data?.sessionId;
+          const authorName = socket.data?.authorName;
+
+          // 1. Exigir que el socket haya completado chat-join previamente y siga en esa sala
+          if (
+            !joinedDiagramId ||
+            !authorSessionId ||
+            !authorName ||
+            !socket.rooms.has(joinedDiagramId)
+          ) {
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "not_joined" });
+            }
+            return;
+          }
+
+          // 2. Volver a comprobar la sesión contra Postgres con sessionExists
+          const validSession = await sessionExists(authorSessionId);
+          if (!validSession) {
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "invalid_session" });
+            }
+            return;
+          }
+
+          // 3. Validar payload (objeto válido, diagramId coincidente con la sala, proposalId no vacío, decision "approve" | "reject")
+          diagramId =
+            typeof payload?.diagramId === "string" ? payload.diagramId.trim() : "";
+          const proposalId =
+            typeof payload?.proposalId === "string" ? payload.proposalId.trim() : "";
+          const decision = payload?.decision;
+
+          if (
+            !payload ||
+            typeof payload !== "object" ||
+            !diagramId ||
+            diagramId !== joinedDiagramId ||
+            !proposalId ||
+            (decision !== "approve" && decision !== "reject")
+          ) {
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "not_found" });
+            }
+            return;
+          }
+
+          targetMessageId = proposalId;
+          let claimResult = await claimProposal(
+            diagramId,
+            targetMessageId,
+            authorName
+          );
+
+          if (!claimResult.ok && claimResult.reason === "not_found") {
+            // Si no coincidió por ObjectId, buscar por proposal.id
+            const db = await getMongoDb();
+            if (db) {
+              const found = await db.collection(CHAT_COLLECTION_NAME).findOne({
+                diagramId,
+                "proposal.id": proposalId,
+              });
+              if (found) {
+                targetMessageId = String(found._id);
+                claimResult = await claimProposal(
+                  diagramId,
+                  targetMessageId,
+                  authorName
+                );
+              }
+            }
+          }
+
+          if (!claimResult.ok) {
+            if (claimResult.reason === "already_decided") {
+              if (typeof callback === "function") {
+                callback({
+                  ok: false,
+                  error: "already_decided",
+                  proposal: claimResult.proposal,
+                });
+              }
+              return;
+            }
+
+            if (typeof callback === "function") {
+              callback({ ok: false, error: "not_found" });
+            }
+            return;
+          }
+
+          hasClaimed = true;
+
+          // 4. Rama "reject"
+          if (decision === "reject") {
+            const settled = await settleProposal(
+              diagramId,
+              targetMessageId,
+              "rejected",
+              authorName
+            );
+
+            if (!settled || !settled.proposal) {
+              if (typeof callback === "function") {
+                callback({ ok: false, error: "not_found" });
+              }
+              return;
+            }
+
+            const publicProposal = toPublicProposal(settled.proposal);
+            const messageId = settled.id;
+
+            const systemDoc = await saveMessage({
+              diagramId,
+              authorSessionId: "system",
+              authorName: "Sistema",
+              role: "system",
+              text: `${authorName} rechazó la propuesta de Codia`,
+            });
+
+            io.to(diagramId).emit("proposal-updated", {
+              diagramId,
+              messageId,
+              proposal: publicProposal,
+            });
+
+            io.to(diagramId).emit(
+              "chat-message",
+              toPublicChatMessage(systemDoc)
+            );
+
+            if (typeof callback === "function") {
+              callback({
+                ok: true,
+                proposal: publicProposal,
+              });
+            }
+            return;
+          }
+
+          // 5. Rama "approve"
+          // Paso 2: Con diagramId vuelve a validar las operaciones guardadas: getDiagramById, extractUmlModel y validateAndResolveOperations
+          const savedOps = Array.isArray(claimResult.message.operations)
+            ? claimResult.message.operations
+            : [];
+
+          const diagram = await getDiagramById(diagramId);
+          let isApplicable = false;
+          let validOperations: any[] = [];
+          let validationWarnings: string[] = [];
+
+          if (diagram && diagram.data && savedOps.length > 0) {
+            const { classes } = extractUmlModel(diagram.data);
+            const validationResult = validateAndResolveOperations(
+              savedOps,
+              classes
+            );
+            validOperations = validationResult.validOperations;
+            validationWarnings = validationResult.warnings;
+            // Si alguna operación ya no es aplicable (válidas < guardadas)
+            if (validOperations.length === savedOps.length) {
+              isApplicable = true;
+            }
+          }
+
+          // Si el diagrama no existe o alguna operación ya no es aplicable: caduca
+          if (!isApplicable) {
+            const settled = await settleProposal(
+              diagramId,
+              targetMessageId,
+              "expired"
+            );
+
+            const publicProposal = settled?.proposal
+              ? toPublicProposal(settled.proposal)
+              : undefined;
+            const messageId = settled?.id || targetMessageId;
+
+            const systemDoc = await saveMessage({
+              diagramId,
+              authorSessionId: "system",
+              authorName: "Sistema",
+              role: "system",
+              text: "La propuesta de Codia caducó porque el diagrama cambió. Repite el pedido a Codia.",
+            });
+
+            if (publicProposal) {
+              io.to(diagramId).emit("proposal-updated", {
+                diagramId,
+                messageId,
+                proposal: publicProposal,
+              });
+            }
+
+            io.to(diagramId).emit(
+              "chat-message",
+              toPublicChatMessage(systemDoc)
+            );
+
+            if (typeof callback === "function") {
+              callback({
+                ok: false,
+                error: "stale",
+                proposal: publicProposal,
+              });
+            }
+            return;
+          }
+
+          // Paso 3: Operaciones válidas -> approverSocket.timeout(timeoutMs).emitWithAck("ai-operations", ...)
+          const timeoutMs = getCodiaAckTimeoutMs();
+          const warnings = Array.isArray(claimResult.message.warnings)
+            ? claimResult.message.warnings
+            : validationWarnings;
+
+          let ackResult: any = null;
+          try {
+            if (socket.connected) {
+              ackResult = await (socket as any)
+                .timeout(timeoutMs)
+                .emitWithAck("ai-operations", {
+                  messageId: `${targetMessageId}:${Date.now()}`,
+                  diagramId,
+                  operations: validOperations,
+                  warnings,
+                  timeoutMs,
+                });
+            }
+          } catch (_ackErr) {
+            ackResult = null;
+          }
+
+          // Paso 4: Si ack llega con applied > 0
+          const isApplied =
+            ackResult &&
+            typeof ackResult === "object" &&
+            typeof ackResult.applied === "number" &&
+            ackResult.applied > 0;
+
+          if (isApplied) {
+            const settled = await settleProposal(
+              diagramId,
+              targetMessageId,
+              "approved",
+              authorName
+            );
+
+            const publicProposal = settled?.proposal
+              ? toPublicProposal(settled.proposal)
+              : undefined;
+            const messageId = settled?.id || targetMessageId;
+
+            const systemDoc = await saveMessage({
+              diagramId,
+              authorSessionId: "system",
+              authorName: "Sistema",
+              role: "system",
+              text: `${authorName} aprobó la propuesta de Codia`,
+            });
+
+            if (publicProposal) {
+              io.to(diagramId).emit("proposal-updated", {
+                diagramId,
+                messageId,
+                proposal: publicProposal,
+              });
+            }
+
+            io.to(diagramId).emit(
+              "chat-message",
+              toPublicChatMessage(systemDoc)
+            );
+
+            if (typeof callback === "function") {
+              callback({
+                ok: true,
+                proposal: publicProposal,
+              });
+            }
+            return;
+          }
+
+          // Paso 5: Si ack falla, timeout o applied === 0 -> revertir a pending
+          const settled = await settleProposal(
+            diagramId,
+            targetMessageId,
+            "pending"
+          );
+
+          const publicProposal = settled?.proposal
+            ? toPublicProposal(settled.proposal)
+            : undefined;
+
+          if (typeof callback === "function") {
+            callback({
+              ok: false,
+              error: "apply_failed",
+              proposal: publicProposal,
+            });
+          }
+        } catch (err: any) {
+          console.error(
+            `[Socket] Error inesperado en proposal-decision (${socket.id}):`,
+            err?.message || err
+          );
+          if (hasClaimed) {
+            try {
+              await settleProposal(diagramId, targetMessageId, "pending");
+            } catch (_revertErr) {
+              // Ignorar error secundario al revertir
+            }
+          }
           if (typeof callback === "function") {
             callback({ ok: false, error: "storage_error" });
           }

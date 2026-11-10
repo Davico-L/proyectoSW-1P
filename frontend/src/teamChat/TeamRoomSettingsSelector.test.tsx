@@ -310,4 +310,135 @@ describe("CU23 Fase 3: TeamRoomSettingsSelector", () => {
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("muestra el tercer radio 'Pide aprobación' con su descripción correspondiente", async () => {
+    mockSocket.emit.mockImplementation((event, payload, cb) => {
+      if (event === "chat-join" && cb) {
+        cb({ ok: true });
+      }
+    });
+
+    render(
+      <TeamRoomSettingsSelector
+        diagramId="diag-1"
+        isConnected={true}
+        isJoined={true}
+        socketInstance={mockSocket}
+      />
+    );
+
+    const button = screen.getByRole("button", { name: "Codia" });
+    fireEvent.click(button);
+
+    const approvalRadio = screen.getByRole("radio", { name: /pide aprobación/i });
+    expect(approvalRadio).toBeInTheDocument();
+    expect(
+      screen.getByText("Codia propone los cambios y el equipo los aprueba o rechaza")
+    ).toBeInTheDocument();
+    expect(approvalRadio).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("al seleccionar el radio 'Pide aprobación', emite ai-settings-update con mode 'approval'", async () => {
+    mockSocket.emit.mockImplementation((event, payload, cb) => {
+      if (event === "chat-join" && cb) {
+        cb({ ok: true, settings: { mode: "apply", style: "mentora" } });
+      }
+    });
+
+    render(
+      <TeamRoomSettingsSelector
+        diagramId="diag-1"
+        isConnected={true}
+        isJoined={true}
+        socketInstance={mockSocket}
+      />
+    );
+
+    const triggerBtn = screen.getByRole("button", { name: "Codia" });
+    fireEvent.click(triggerBtn);
+
+    const approvalRadio = screen.getByRole("radio", { name: /pide aprobación/i });
+    expect(approvalRadio).toHaveAttribute("aria-checked", "false");
+
+    let updateCallback: Function | null = null;
+    mockSocket.emit.mockImplementation((event, payload, cb) => {
+      if (event === "ai-settings-update") {
+        updateCallback = cb;
+      }
+    });
+
+    fireEvent.click(approvalRadio);
+
+    expect(mockSocket.emit).toHaveBeenCalledWith(
+      "ai-settings-update",
+      { diagramId: "diag-1", mode: "approval", style: "mentora" },
+      expect.any(Function)
+    );
+
+    expect(approvalRadio).toBeDisabled();
+
+    await act(async () => {
+      updateCallback!({
+        ok: true,
+        settings: { mode: "approval", style: "mentora" },
+      });
+    });
+
+    await waitFor(() => {
+      expect(approvalRadio).not.toBeDisabled();
+      expect(approvalRadio).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  it("refleja el modo 'approval' recibido del servidor tanto en chat-join como en ai-settings-changed", async () => {
+    // 1. Recibir approval en chat-join
+    mockSocket.emit.mockImplementation((event, payload, cb) => {
+      if (event === "chat-join" && cb) {
+        cb({
+          ok: true,
+          settings: { mode: "approval", style: "directa" },
+        });
+      }
+    });
+
+    render(
+      <TeamRoomSettingsSelector
+        diagramId="diag-1"
+        isConnected={true}
+        isJoined={true}
+        socketInstance={mockSocket}
+      />
+    );
+
+    const triggerBtn = screen.getByRole("button", { name: "Codia" });
+    fireEvent.click(triggerBtn);
+
+    const approvalRadio = screen.getByRole("radio", { name: /pide aprobación/i });
+    expect(approvalRadio).toHaveAttribute("aria-checked", "true");
+
+    // 2. Recibir ai-settings-changed con mode "apply" y luego "approval" desde el socket
+    await act(async () => {
+      listeners["ai-settings-changed"]?.({
+        diagramId: "diag-1",
+        mode: "apply",
+        style: "directa",
+      });
+    });
+
+    await waitFor(() => {
+      expect(approvalRadio).toHaveAttribute("aria-checked", "false");
+    });
+
+    await act(async () => {
+      listeners["ai-settings-changed"]?.({
+        diagramId: "diag-1",
+        mode: "approval",
+        style: "directa",
+      });
+    });
+
+    await waitFor(() => {
+      expect(approvalRadio).toHaveAttribute("aria-checked", "true");
+    });
+  });
 });

@@ -1,5 +1,14 @@
 export const AI_DISPLAY_NAME = "Codia";
 
+export interface PublicProposalData {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "expired" | string;
+  summary: string[];
+  requestedBy: string;
+  decidedBy?: string;
+  decidedAt?: string | Date;
+}
+
 export interface PublicChatMessage {
   id: string;
   diagramId: string;
@@ -10,7 +19,7 @@ export interface PublicChatMessage {
   mentions?: string[];
   replyTo?: string;
   addressedTo?: string;
-  proposal?: any;
+  proposal?: PublicProposalData;
   kind?: string;
 }
 

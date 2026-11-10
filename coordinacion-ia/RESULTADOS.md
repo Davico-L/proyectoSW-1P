@@ -1602,6 +1602,309 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Notas y Observaciones**:
   - No se modificó ningún archivo fuera de los autorizados (`TeamRoomSettingsSelector.tsx`, `TeamChat.scss` y prueba unitaria).
 
+### [RES-105] CU22 Fase 1A - Incorporación del Modo "approval" en roomSettingsRepository
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-105
+- **Entregables Producidos**:
+  - `backend/src/chat/roomSettingsRepository.ts` (**modificado**):
+    - Ampliado `RoomMode` a `"apply" | "advise" | "approval"`.
+    - Ampliado `VALID_ROOM_MODES` a `["apply", "advise", "approval"] as const`.
+    - Agregado en `MODE_LABELS`: `approval: "Pide aprobación"`.
+    - Valor por defecto preservado: `DEFAULT_ROOM_SETTINGS.mode = "apply"`.
+  - `backend/src/chat/roomSettings.test.ts` (**modificado**):
+    - Actualizado test 1 para comprobar `isValidMode("approval") === true`.
+    - Agregada prueba 7 verificando aceptación de `"approval"`, rechazo de valores inválidos (`"auto"`, `"reject"`, etc.), etiqueta en `MODE_LABELS.approval` y formateo de anuncios con `formatSettingsAnnouncement` usando `"Pide aprobación"`, junto con guardado y recuperación en MongoDB.
+  - `backend/src/chat/socketRoomSettingsEvents.test.ts` (**modificado**):
+    - Actualizado test 7 para verificar `formatSettingsAnnouncement` con `"approval"`.
+    - Agregado test 8 para comprobar que el evento de socket `ai-settings-update` acepta `mode: "approval"`, persiste y emite el anuncio de sistema a la sala con `'Pide aprobación'`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 334/334 pruebas en verde (52 suites, 100% éxito, 0 regresiones).
+  - `cd frontend; yarn test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - No se tocaron `aiChatService`, `frontend` ni la sincronización de diagramas.
+
+### [RES-106] CU22 Fase 1B - Creación de proposalHelpers.ts y ampliación de kind
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-106
+- **Entregables Producidos**:
+  - `backend/src/chat/proposalHelpers.ts` (**nuevo**):
+    - Definición de `ProposalStatus` interno (`"pending" | "applying" | "approved" | "rejected" | "expired"`).
+    - Definición de `PublicProposalStatus` público (`"pending" | "approved" | "rejected" | "expired"`).
+    - Interfaces `Proposal`, `PublicProposal` y `CreateProposalParams`.
+    - Función pura `createProposal({ summary, requestedBy })`: genera UUID v4 único mediante `randomUUID()`, asigna estado `"pending"`, copia segura del array `summary` y `requestedBy`.
+    - Función pura `toPublicProposal(p)`: transforma la propuesta a su forma pública sanitizada, mapeando `"applying"` a `"pending"`, conservando `decidedBy` y `decidedAt` si existen, y omitiendo de forma estricta cualquier campo interno como `operations`, `_id` o metadatos de base de datos.
+    - Función pura `buildProposalText(nombre, resumen)`: formatea `"<Nombre>, propongo: <resumen>. Queda pendiente de aprobación del equipo."` saneando espacios y recortando puntos finales redundantes del resumen.
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - Ampliado `AnswerInRoomResult.kind` a `"answer" | "modification" | "proposal"`.
+  - `backend/src/chat/proposalHelpers.test.ts` (**nuevo**):
+    - 14 pruebas unitarias cubriendo listas de estados, generación de UUID v4, unicidad, sanitización pública con mapeo de `"applying"` -> `"pending"`, exclusión de campos internos, formateo de texto de anuncio y compatibilidad de tipos con `kind`.
+  - `backend/package.json` (**modificado**):
+    - Incorporada la nueva suite `src/chat/proposalHelpers.test.ts` al comando `npm test`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 348/348 pruebas en verde (58 suites, 100% éxito, 0 regresiones).
+  - `cd frontend; yarn test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - No se modificaron otros archivos del backend ni del frontend.
+
+### [RES-107] CU22 Fase 1C - Métodos de propuesta y consulta en chatRepository
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-107
+- **Entregables Producidos**:
+  - `backend/src/chat/chatRepository.ts` (**modificado**):
+    - Función `getMessageById(diagramId, messageId)`: busca por `_id` (ObjectId válido) y `diagramId`, devolviendo el documento completo (`ChatMessageDocument` con `operations`) o `null` si no existe o el id es inválido.
+    - Función `claimProposal(diagramId, messageId, decidedBy)`: realiza un único `findOneAndUpdate` atómico con filtro `_id`, `diagramId` y (`proposal.status === "pending"` o `proposal.status === "applying"` con `applyingAt` mayor a 60 segundos), asignando `"applying"` y `applyingAt: now`. Devuelve `{ ok: true, message }` o `{ ok: false, reason: "not_found" | "already_decided", proposal: versión pública vigente }`.
+    - Función `settleProposal(diagramId, messageId, outcome, decidedBy?)`: actúa atómicamente solo si el estado actual es `"applying"`. Para `"approved"`, `"rejected"` o `"expired"` guarda `decidedBy` y `decidedAt: now` y retira `applyingAt`. Para `"pending"` reasigna el estado y retira `applyingAt`. Devuelve el documento actualizado o `null`.
+    - Helper `toChatMessageDocument(doc)`: centraliza el mapeo consistente de documentos internos desde MongoDB.
+    - Función `toPublicChatMessage`: actualizada para procesar `doc.proposal` mediante `toPublicProposal`, asegurando que el estado `"applying"` se exponga como `"pending"` y que `operations` jamás viaje a los clientes.
+  - `backend/src/chat/proposalHelpers.ts` (**modificado**):
+    - Soporte en `toPublicProposal` para omitir `operations` en objetos genéricos o legados sin `id`/`status`.
+  - `backend/src/chat/chatRepository.test.ts` (**modificado**):
+    - Agregado bloque 10 con 8 pruebas exhaustivas cubriendo:
+      1. `getMessageById` con éxito (incluye `operations`), id inexistente e id con formato inválido.
+      2. Reclamo exitoso (`claimProposal`) con status `"applying"`, `applyingAt` y preservación de `operations`.
+      3. Doble reclamo concurrente/inmediato fallando con `already_decided` y propuesta pública como `"pending"`.
+      4. Reclamo tras superar el umbral de 60 segundos en estado `"applying"`.
+      5. Liquidación (`settleProposal`) de cada resultado (`approved`, `rejected`, `expired`) con `decidedBy`, `decidedAt` y prevención de doble liquidación.
+      6. Reversión de propuesta a `"pending"` con retiro de `applyingAt` y capacidad de volver a reclamar exitosamente.
+      7. `claimProposal` y `settleProposal` ante ids inexistentes e inválidos.
+      8. Aislamiento de seguridad: `operations` omitido estrictamente en mensajes públicos y sincronización en `listMessages`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 356/356 pruebas en verde (59 suites, 100% éxito, 0 regresiones).
+  - `cd frontend; yarn test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - No se tocaron sockets, `aiChatService` ni componentes de frontend.
+
+### [RES-108] CU22 Fase 2A-1 - Integración del modo "approval" en aiChatService
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-108
+- **Entregables Producidos**:
+  - `backend/src/chat/aiChatService.ts` (**modificado**):
+    - Incorporado el campo opcional `proposal?: Proposal` a `AnswerInRoomResult`.
+    - En la rama de modificación (`intent === "modification" && hasOnOperations` con `status === "ready"`):
+      - Si `currentMode === "approval"`, NO se invoca `params.onOperations!`.
+      - Se reutiliza la lógica de resumen de `"advise"` con `summarizeOperations(validOps, warningsList)`.
+      - Se crea la propuesta con `createProposal({ summary: [cleanSummary], requestedBy: cleanAsker })`.
+      - Se genera el mensaje con `buildProposalText(cleanAsker, cleanSummary)`.
+      - Se resuelve con `{ kind: "proposal", message, operations: validOps, warnings: warningsList, proposal }`.
+    - Los modos `"apply"` y `"advise"` y los demás estados (`tooMany`, `onlyWarnings`, `noChanges`, `diagramNotFound`) permanecen idénticos a CU20/CU23.
+  - `backend/src/chat/aiChatServiceCu22.test.ts` (**nuevo**):
+    - 4 pruebas automatizadas con `node:test`:
+      1. Modo `"approval"` con `status === "ready"` no llama a `onOperations`, resuelve `kind === "proposal"`, genera mensaje con `buildProposalText`, incluye `operations: validOps` y adjunta `proposal` pendiente con UUID v4.
+      2. Modo `"approval"` con warnings refleja el resumen y avisos en la propuesta.
+      3. Modo `"approval"` con pedidos no soportados (`onlyWarnings`), sin cambios (`noChanges`), `tooMany` o `diagramNotFound` responde idéntico a CU20 sin generar propuesta.
+      4. Modos `"apply"` y `"advise"` continúan operando exactamente como en CU20/CU23.
+  - `backend/package.json` (**modificado**):
+    - Agregada la suite `src/chat/aiChatServiceCu22.test.ts` a `npm test`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 360/360 pruebas en verde (60 suites, 100% éxito, 0 regresiones).
+  - `cd frontend; yarn test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - No se tocaron sockets ni componentes de frontend.
+
+### [RES-109] CU22 Fase 2A-2 - Flujo de chat-message en socket.ts para propuestas
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-109
+- **Entregables Producidos**:
+  - `backend/src/socket.ts`: En el manejador de `chat-message`, `saveMessage` persiste `proposal: result.proposal` además de `operations: result.operations`. En modo `approval`, `ai-operations` no se emite hacia el socket del autor y el mensaje se difunde a la sala vía `toPublicChatMessage(aiDoc)` (que limpia `operations` y sanitiza la propuesta hacia clientes).
+  - `backend/src/chat/socketChatEvents.test.ts`: Actualizados `createMockSocket` y `connectSocket` para soportar mocking de `connected`, `timeout().emitWithAck` y socket servers con servicios de IA personalizados (`customAiChatService`). Agregadas pruebas 10 y 11:
+    - Test 10: En modo `approval`, un pedido de modificación guarda en MongoDB el mensaje con propuesta en estado `"pending"` y `operations`, la sala recibe el broadcast sin `operations` y con propuesta pública, y NO se emite `ai-operations` al socket.
+    - Test 11: En modo `apply`, un pedido de modificación continúa emitiendo `ai-operations` con acuse al socket del solicitante, sin generar propuesta.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 362/362 pruebas en verde (60 suites, 100% éxito, 0 fallos).
+  - `yarn --cwd frontend test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - Modos `apply` y `advise` preservados de manera idéntica. Listo para Fase 2B (eventos de socket para aprobar / rechazar propuesta).
+
+### [RES-110] CU22 Fase 2B-1 - Listener proposal-decision en socket.ts (flujo reject)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-110
+- **Entregables Producidos**:
+  - `backend/src/socket.ts`:
+    - Incorporado listener Socket.IO `"proposal-decision"` con payload `{ diagramId, proposalId, decision: "approve" | "reject" }` y acknowledgement `{ ok, error?, proposal? }`.
+    - Verificación estricta de sala unida (`socket.data.diagramId`, `socket.rooms.has(diagramId)`) y de sesión activa en Postgres (`sessionExists`), asegurando que el nombre de quien decide provenga exclusivamente de `socket.data.authorName`.
+    - Manejo de errores de acceso y formato: `"not_joined"`, `"invalid_session"`, `"not_found"` (ante payload mal formado o propuesta no encontrada).
+    - Flujo `"reject"`: resolución transparente de `proposalId` (tanto por `messageId` de MongoDB como por `proposal.id` UUID), reclamo atómico vía `claimProposal`, liquidación a estado `"rejected"` con `decidedBy` vía `settleProposal`, persistencia de mensaje de sistema `"<Nombre> rechazó la propuesta de Codia"` (rol `"system"`), difusión a la sala del evento `"proposal-updated"` `{ diagramId, messageId, proposal }` y del mensaje de sistema vía `"chat-message"`, y respuesta de acknowledgement exitoso `{ ok: true, proposal }`.
+    - Concurrencia: si `claimProposal` reporta `reason: "already_decided"`, responde inmediatamente con `{ ok: false, error: "already_decided", proposal }`.
+    - Rama `"approve"`: devuelve `{ ok: false, error: "apply_failed" }` sin reclamar ni modificar la propuesta en base de datos (preparatoria para Fase 2B-2).
+  - `backend/src/chat/socketProposalEvents.test.ts`: Suite dedicada de 7 pruebas unitarias e integración de Socket.IO que valida:
+    1. Rechazo exitoso con liquidación a `"rejected"`, emisión de `"proposal-updated"` y mensaje de sistema a la sala, y respuesta ack `{ ok: true, proposal }`.
+    2. Rechazo exitoso cuando `proposalId` es el UUID interno de la propuesta (`proposal.id`).
+    3. Doble rechazo concurrente: exactamente uno gana y el otro recibe error `"already_decided"`.
+    4. Rechazo con `"not_joined"` si el socket no completó `chat-join`.
+    5. Rechazo con `"invalid_session"` si la sesión no es válida en Postgres.
+    6. Rechazo con `"not_found"` ante propuesta inexistente, `proposalId` vacío, decisión inválida o payload nulo.
+    7. Rama `"approve"` responde `"apply_failed"` sin alterar el estado `"pending"` en base de datos.
+  - `backend/package.json`: Agregada la suite `src/chat/socketProposalEvents.test.ts` a `npm test`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 369/369 pruebas en verde (61 suites, 100% de éxito, 0 fallos).
+  - `yarn --cwd frontend test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - Se respetaron al 100% las restricciones: no se llamó al modelo, no se tocó el diagrama, y los modos `apply` y `advise` permanecen intactos. Listo para Fase 2B-2 (flujo `approve`).
+
+### [RES-111] CU22 Fase 2B-2 - Rama approve en proposal-decision de socket.ts
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-111
+- **Entregables Producidos**:
+  - `backend/src/socket.ts`:
+    - Reemplazada la respuesta temporal `apply_failed` con la implementación completa de la rama `"approve"` en `"proposal-decision"`.
+    - **Validación del diagrama**: Obtiene el diagrama actual (`getDiagramById`), extrae su modelo UML (`extractUmlModel`) y revalida las operaciones guardadas con `validateAndResolveOperations`.
+    - **Caducidad (stale)**: Si el diagrama no existe o alguna operación ya no es aplicable (operaciones válidas < guardadas), liquida la propuesta como `"expired"` vía `settleProposal` (sin `decidedBy`), guarda el mensaje de sistema `"La propuesta de Codia caducó porque el diagrama cambió. Repite el pedido a Codia."`, emite `"proposal-updated"` y el mensaje de sistema a la sala, y responde ack `{ ok: false, error: "stale", proposal }`.
+    - **Emisión dirigida y acuse**: Si las operaciones son aplicables, emite `emitWithAck("ai-operations")` con timeout (`getCodiaAckTimeoutMs()`) exclusivamente al socket del aprobador (`socket`), con `messageId` fresco `${targetMessageId}:${Date.now()}` para evitar colisiones con el deduplicador del cliente.
+    - **Liquidación por éxito**: Si el cliente responde acuse con `applied > 0`, liquida la propuesta a `"approved"` con `decidedBy: authorName`, guarda mensaje de sistema `"<Nombre> aprobó la propuesta de Codia"`, emite `"proposal-updated"` y el mensaje de sistema a la sala, y responde ack `{ ok: true, proposal }`.
+    - **Reversión por fallo**: Si el acuse falla, vence el timeout o `applied === 0`, revierte la propuesta a `"pending"` mediante `settleProposal` y responde ack `{ ok: false, error: "apply_failed", proposal }`.
+    - **Tolerancia a fallos**: Captura excepciones posteriores al reclamo intentando revertir a `"pending"` y respondiendo `{ ok: false, error: "storage_error" }`.
+  - `backend/src/chat/socketProposalEvents.test.ts`:
+    - Incorporado mock dinámico de diagramas (`mockDiagrams`) en `pool.query` para probar validaciones de clases y escenas de Excalidraw sin depender de Postgres.
+    - Agregadas las pruebas de la rama approve:
+      - Test 7: Aprobación exitosa con `emitWithAck` dirigido exclusivamente al socket de quien aprueba (no a otros integrantes), liquidación a `"approved"`, mensaje de sistema y broadcast.
+      - Test 8: Doble aprobación concurrente donde solo una se aplica y la segunda falla con `"already_decided"`.
+      - Test 9: Detección de propuesta caducada (`stale`) tras cambiar/eliminar la clase en el diagrama, liquidando a `"expired"` con anuncio de caducidad.
+      - Test 10: Fallo o timeout en ack del cliente revierte la propuesta a `"pending"` permitiendo un reintento posterior exitoso.
+      - Test 11: Un usuario puede aprobar su propia propuesta legítimamente.
+      - Test 12: Intentar aprobar una propuesta ya rechazada responde `"already_decided"`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 374/374 pruebas en verde (61 suites, 100% éxito, 0 fallos).
+  - `yarn --cwd frontend test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - Inspeccionado `useTeamChat.ts` verificando que el cliente usa `messageId` exclusivamente para deduplicación en `processedMessageIdsRef`.
+  - Modos `apply` y `advise` conservados idénticos y funcionales. Backend de CU22 completado al 100%.
+
+### [RES-112] Script de Integración y Smoke Test Socket.IO para CU22 (smoke:cu22)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-112
+- **Entregables Producidos**:
+  - `backend/src/scripts/cu22-socket-smoke.ts`:
+    - Script de integración end-to-end autónomo para CU22 con servidor efímero Socket.IO y mock en memoria para Postgres.
+    - Configura el proveedor de IA en Groq (`setActiveProviderId("groq")`) para no consumir cuota de Gemini.
+    - Ejecuta y valida rigurosamente los 5 pasos solicitados con dos clientes (Ana y Luis):
+      1. Configuración de la sala en modo `"approval"` (`"Pide aprobación"`).
+      2. Petición de Ana (`"@Codia agrega la clase Factura"`): Codia genera propuesta con `kind: "proposal"`, estado `"pending"`, sin exponer `operations` en el broadcast, y sin emitir `ai-operations` a ningún socket.
+      3. Luis rechaza la propuesta: ack exitoso con estado `"rejected"`, broadcast de `proposal-updated` con `"rejected"` y mensaje de sistema `"<Nombre> rechazó la propuesta de Codia"`.
+      4. Nuevo pedido de modificación (`"@Codia agrega la clase Cliente"`): Luis aprueba, recibiendo exclusivamente en su socket el evento `ai-operations` (el socket de Ana no lo recibe); su cliente responde ack con `applied: 1`, liquidando a `"approved"`, con mensaje de sistema y `proposal-updated` a ambos clientes.
+      5. Doble aprobación concurrente sobre un nuevo pedido (`"@Codia agrega la clase Pedido"`): se lanzan aprobaciones en paralelo desde ambos clientes; exactamente uno gana (`ok: true`) y el segundo es rechazado con `{ ok: false, error: "already_decided" }`.
+    - Limpieza automática de colecciones en MongoDB Atlas (`chat_messages` y `ai_room_settings`) y cierre seguro de sockets y servidor.
+  - `backend/package.json`:
+    - Registrado comando `"smoke:cu22": "tsx src/scripts/cu22-socket-smoke.ts"`.
+- **Verificación Realizada**:
+  - `npm --prefix backend run smoke:cu22`: Los 5 pasos completados al 100% con código de salida 0.
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 374/374 pruebas en verde (61 suites, 0 fallos).
+  - `yarn --cwd frontend test:app src/teamChat --run`: 57/57 pruebas en verde (4 suites, 0 fallos).
+- **Notas y Observaciones**:
+  - Se confirmó que los clientes se unen a la sala mediante `join-diagram`, garantizando que `chat-join` verifique la presencia en la sala antes de registrar la sesión.
+  - El flujo completo de CU22 en el backend está verificado de forma end-to-end con Groq.
+
+### [RES-113] Ajuste en aiChatService.ts: proposal.summary por Operación y Advertencias Aparte
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-113
+- **Entregables Producidos**:
+  - `backend/src/chat/modificationHelpers.ts`:
+    - Exportada la función pura `describeOperation(op: any): string | null` para describir operaciones individuales.
+  - `backend/src/chat/aiChatService.ts`:
+    - En la rama modo `"approval"`, se actualizó la construcción de `proposal.summary` para que genere un arreglo con un elemento por cada operación válida usando `describeOperation`, seguido de cada advertencia de `warningsList` como elementos independientes (`[...opLines, ...cleanWarnings]`).
+    - Se preservó estrictamente el texto del mensaje (`buildProposalText(cleanAsker, cleanSummary)`) idéntico a su comportamiento previo.
+  - `backend/src/chat/aiChatServiceCu22.test.ts`:
+    - Ajustadas las pruebas unitarias para validar `proposal.summary` con elementos desglosados por operación y advertencias separadas.
+    - Agregada prueba específica `2b` para escenarios con múltiples operaciones (`createClass` con atributos, `updateClass` con renombramiento, `deleteClass`) y advertencias independientes.
+- **Verificación Realizada**:
+  - `npx tsx --test backend/src/chat/aiChatServiceCu22.test.ts`: 5/5 pruebas en verde.
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores.
+  - `npm --prefix backend test`: 375/375 pruebas en verde (61 suites, 0 fallos).
+  - `yarn --cwd frontend test:app src/teamChat --run`: 57/57 pruebas en verde.
+- **Notas y Observaciones**:
+  - Se garantiza compatibilidad hacia atrás y sin impacto en los modos `apply` ni `advise`.
+
+### [RES-114] CU22 Fase 3A: Modo Approval en Selector de Configuración de Codia (Frontend)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-114
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/TeamRoomSettingsSelector.tsx`:
+    - Ampliado el tipo local `RoomMode` para incluir `"approval"` (`"apply" | "advise" | "approval"`).
+    - Agregado `"approval"` a las validaciones de `mode` en el acuse de `chat-join` y en el listener del evento de sincronización `ai-settings-changed`.
+    - Agregado el tercer botón de opción (radio) con `title="Pide aprobación"`, etiqueta `"Pide aprobación"`, descripción `"Codia propone los cambios y el equipo los aprueba o rechaza"`, conservando exactamente el mismo estilo y comportamiento que los radios existentes.
+  - `frontend/src/teamChat/TeamRoomSettingsSelector.test.tsx`:
+    - Añadidas 3 pruebas unitarias completas:
+      1. Se muestra el tercer radio `"Pide aprobación"` con su texto y descripción.
+      2. Seleccionar el radio emite `ai-settings-update` con `mode: "approval"` y actualiza el estado al recibir acuse exitoso.
+      3. Se refleja el modo `"approval"` recibido del servidor tanto en `chat-join` como reactivamente mediante `ai-settings-changed`.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat --run`: 60/60 pruebas en verde (4 suites, 11 tests en `TeamRoomSettingsSelector.test.tsx`).
+  - `yarn --cwd frontend test:typecheck` (`tsc`): 0 errores en todo el monorepo.
+- **Notas y Observaciones**:
+  - Los radios `"Aplica los cambios"` y `"Solo asesora"` se mantuvieron inalterados. Selector completamente adaptado para CU22.
+
+### [RES-115] CU22 Fase 3B: Componente ProposalCard y Estilos (Frontend)
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-115
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/ProposalCard.tsx`:
+    - Componente puramente presentacional que recibe `{ proposal, connected, busy, error?, onDecision }`.
+    - Cabecera con título `"Propuesta de Codia"` y etiqueta de estado superior (`"Pendiente"`, `"Aprobada"`, `"Rechazada"`, `"Caducada"`).
+    - Lista de resumen renderizada con una viñeta por elemento (`<ul>` / `<li>`).
+    - Estado `"pending"`:
+      - Botón principal `"Aprobar"` (relleno) y secundario `"Rechazar"` (solo borde).
+      - Estado `busy`: botón Aprobar muestra `"Procesando…"` y ambos botones se deshabilitan.
+      - Estado sin conexión (`connected === false`): ambos botones deshabilitados con nota `"Sin conexión"`.
+      - Línea de error opcional bajo los botones (`role="alert"`).
+    - Estados concluidos (`"approved"`, `"rejected"`, `"expired"`):
+      - Sin botones de acción.
+      - Banner de resolución definitivo: `"Aprobada por X"`, `"Rechazada por X"` o `"Caducada: repite el pedido a Codia"`.
+  - `frontend/src/teamChat/ProposalCard.scss`:
+    - Estilos visuales armónicos y tenues con baja saturación (ámbar suave para pendiente/caducada, verde tenue para aprobada, gris neutro para rechazada).
+    - Soporte completo para temas claro y oscuro (`.theme--dark, [data-theme="dark"]`).
+    - Importado en `TeamChat.scss`.
+  - `frontend/src/teamChat/ProposalCard.test.tsx`:
+    - 9 pruebas unitarias exhaustivas en Vitest cubriendo renderizado de viñetas, botones, clics de decisión, estados busy y offline, manejo de errores y todos los estados finales.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat --run`: 69/69 pruebas en verde (5 suites, 9/9 en `ProposalCard.test.tsx`).
+  - `yarn --cwd frontend test:typecheck` (`tsc`): 0 errores en todo el monorepo.
+- **Notas y Observaciones**:
+  - El componente está desacoplado de la lógica de sockets para su integración limpia en `TeamChatPanel.tsx`.
+
+### [RES-117] CU22 Fase 3C-2: Integración de ProposalCard en TeamChatPanel y pruebas
+- **Fecha**: 2026-11-09
+- **Tarea Asociada**: TSK-117
+- **Entregables Producidos**:
+  - `frontend/src/teamChat/TeamChatPanel.tsx`:
+    - Incorporadas a `TeamChatPanelProps` las propiedades `busyByMessageId`, `errorByMessageId`, `decideProposal` y `onDecideProposal`.
+    - En el mapeo de renderizado de mensajes (`messages.map`), si `msg.proposal` existe, se renderiza `<ProposalCard>` directamente debajo del texto formateado de Codia con:
+      - `proposal={msg.proposal}`
+      - `connected={isConnected}`
+      - `busy={Boolean(busyByMessageId?.[msg.id])}`
+      - `error={errorByMessageId?.[msg.id] || undefined}`
+      - `onDecision={(decision) => (decideProposal || onDecideProposal)?.(msg.id, decision)}`
+    - Preservado sin alteraciones el renderizado de todos los demás mensajes (mensajes de usuario, mensajes del sistema y mensajes de IA sin propuesta).
+  - `frontend/excalidraw-app/App.tsx`:
+    - Conectadas las props `busyByMessageId={teamChat.busyByMessageId}`, `errorByMessageId={teamChat.errorByMessageId}` y `decideProposal={teamChat.decideProposal}` en la invocación de `<TeamChatPanel>`.
+  - `frontend/src/teamChat/TeamChatPanel.test.tsx`:
+    - Archivo de pruebas Vitest que valida:
+      1. Mensaje con proposal pendiente muestra la tarjeta con resumen y botones habilitados "Aprobar" y "Rechazar", llamando a `decideProposal(msg.id, decision)` al hacer clic.
+      2. Mensaje con proposal aprobado muestra "Aprobada por X" sin botones.
+      3. Mensaje sin proposal no muestra tarjeta de propuesta.
+      4. Estado ocupado (`busyByMessageId` activo) deshabilita los botones y muestra "Procesando…".
+      5. Alerta de error (`errorByMessageId` activo) muestra el aviso correspondiente debajo de la tarjeta.
+- **Verificación Realizada**:
+  - `yarn --cwd frontend test:app src/teamChat --run`: 80/80 pruebas en verde (7 suites, 0 fallos).
+  - `yarn --cwd frontend test:typecheck` (`tsc`): 0 errores en todo el proyecto frontend.
+  - `npm --prefix backend run typecheck` (`tsc --noEmit`): 0 errores en todo el proyecto backend.
+- **Notas y Observaciones**:
+  - La integración en el panel respeta la arquitectura de temas claro y oscuro, y mantiene totalmente desacoplada la lógica de decisiones a través del hook `useTeamChat`.
+
+
+
+
+
+
+
+
+
 
 
 

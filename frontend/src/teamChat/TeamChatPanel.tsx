@@ -5,6 +5,7 @@ import {
   getMentionSuggestionMatch,
 } from "./mentionHelper";
 import { renderAiFormattedText } from "./aiTextFormatter";
+import { ProposalCard } from "./ProposalCard";
 import { TeamModelSelector } from "./TeamModelSelector";
 import { TeamRoomSettingsSelector } from "./TeamRoomSettingsSelector";
 import { socket } from "../../excalidraw-app/data/realtimeSync";
@@ -24,6 +25,16 @@ export interface TeamChatPanelProps {
   backendUrl?: string;
   diagramId?: string | null;
   excalidrawAPI?: any;
+  busyByMessageId?: Record<string, boolean>;
+  errorByMessageId?: Record<string, string | null>;
+  decideProposal?: (
+    messageId: string,
+    decision: "approve" | "reject"
+  ) => void | Promise<any>;
+  onDecideProposal?: (
+    messageId: string,
+    decision: "approve" | "reject"
+  ) => void | Promise<any>;
 }
 
 export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
@@ -38,7 +49,12 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
   onClearError,
   backendUrl,
   diagramId,
+  busyByMessageId,
+  errorByMessageId,
+  decideProposal,
+  onDecideProposal,
 }) => {
+  const handleDecideProposal = decideProposal || onDecideProposal;
   const [inputText, setInputText] = useState<string>("");
   const [cursorPosition, setCursorPosition] = useState<number>(0);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -429,6 +445,17 @@ export const TeamChatPanel: React.FC<TeamChatPanelProps> = ({
                         </React.Fragment>
                       )
                     )
+                  )}
+                  {msg.proposal && (
+                    <ProposalCard
+                      proposal={msg.proposal}
+                      connected={isConnected}
+                      busy={Boolean(busyByMessageId?.[msg.id])}
+                      error={errorByMessageId?.[msg.id] || undefined}
+                      onDecision={(decision) =>
+                        handleDecideProposal?.(msg.id, decision)
+                      }
+                    />
                   )}
                 </div>
               </div>

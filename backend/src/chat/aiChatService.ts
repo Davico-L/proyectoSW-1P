@@ -5,7 +5,7 @@ import {
   trimToLastSentence,
   stripGreetingPreamble,
 } from "./aiChatHelpers";
-import { classifyIntent, summarizeOperations } from "./modificationHelpers";
+import { classifyIntent, summarizeOperations, describeOperation } from "./modificationHelpers";
 import { requestDiagramEdit } from "./diagramAiEditService";
 import { reviewDiagramInRoom, ReviewDiagramInRoomDeps } from "./diagramReviewService";
 import { getMongoClient } from "../db/mongo";
@@ -15,6 +15,7 @@ import {
   DEFAULT_ROOM_SETTINGS,
 } from "./roomSettingsRepository";
 import { buildSystemPrompt } from "./styleFragments";
+import { createProposal, buildProposalText, Proposal } from "./proposalHelpers";
 
 async function defaultGetRoomSettings(diagramId: string): Promise<RoomSettings> {
   if (!getMongoClient()) {
@@ -102,9 +103,10 @@ export interface AnswerInRoomParams {
 export interface AnswerInRoomResult {
   message: string;
   operations: any[];
-  kind?: "answer" | "modification";
+  kind?: "answer" | "modification" | "proposal";
   warnings?: string[];
   findings?: any[];
+  proposal?: Proposal;
 }
 
 export function createAiChatService(deps: AiChatServiceDeps) {
@@ -229,6 +231,38 @@ export function createAiChatService(deps: AiChatServiceDeps) {
                   operations: [],
                   warnings: warningsList,
                   kind: "answer",
+                });
+                return;
+              }
+
+              if (currentMode === "approval") {
+                const summary = summarizeOperations(validOps, warningsList);
+                const cleanSummary = summary.replace(/\.+$/, "");
+                const opLines = validOps
+                  .map((op) => describeOperation(op))
+                  .filter((desc): desc is string => Boolean(desc));
+                const cleanWarnings = Array.isArray(warningsList)
+                  ? warningsList
+                      .map((w) => (typeof w === "string" ? w.trim() : ""))
+                      .filter(Boolean)
+                  : [];
+                const summaryLines =
+                  opLines.length > 0 || cleanWarnings.length > 0
+                    ? [...opLines, ...cleanWarnings]
+                    : cleanSummary
+                    ? [cleanSummary]
+                    : [];
+                const proposal = createProposal({
+                  summary: summaryLines,
+                  requestedBy: cleanAsker,
+                });
+                const finalMsg = buildProposalText(cleanAsker, cleanSummary);
+                resolve({
+                  kind: "proposal",
+                  message: finalMsg,
+                  operations: validOps,
+                  warnings: warningsList,
+                  proposal,
                 });
                 return;
               }

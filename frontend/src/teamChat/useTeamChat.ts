@@ -22,20 +22,34 @@ export interface UseTeamChatOptions {
   diagramId: string | null;
   backendUrl?: string;
   excalidrawAPI?: ExcalidrawImperativeAPI | null;
+  socketInstance?: any;
 }
 
 export const useTeamChat = ({
   diagramId,
   backendUrl = BACKEND_URL,
   excalidrawAPI,
+  socketInstance,
 }: UseTeamChatOptions) => {
+  const activeSocket = socketInstance || socket;
+
   const [messages, setMessages] = useState<PublicChatMessage[]>([]);
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [isConnected, setIsConnected] = useState<boolean>(socket.connected);
+  const [isConnected, setIsConnected] = useState<boolean>(
+    Boolean(activeSocket?.connected),
+  );
   const [isJoined, setIsJoined] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState<boolean>(false);
+
+  // CU22: Estados de propuestas (por messageId)
+  const [busyByMessageId, setBusyByMessageId] = useState<
+    Record<string, boolean>
+  >({});
+  const [errorByMessageId, setErrorByMessageId] = useState<
+    Record<string, string | null>
+  >({});
 
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(
     excalidrawAPI || null,
@@ -77,7 +91,7 @@ export const useTeamChat = ({
    */
   const attemptChatJoin = useCallback(() => {
     const activeDiagId = currentDiagramIdRef.current;
-    if (!activeDiagId || !socket.connected) {
+    if (!activeDiagId || !activeSocket?.connected) {
       setIsJoined(false);
       return;
     }
@@ -94,7 +108,7 @@ export const useTeamChat = ({
       return;
     }
 
-    socket.emit(
+    activeSocket.emit(
       "chat-join",
       { diagramId: activeDiagId, sessionId },
       (res: { ok: boolean; error?: string }) => {
@@ -213,36 +227,38 @@ export const useTeamChat = ({
       clearRetryTimeout();
     };
 
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
+    activeSocket.on("connect", handleConnect);
+    activeSocket.on("disconnect", handleDisconnect);
 
     // Estado inicial de conexión
-    setIsConnected(socket.connected);
+    setIsConnected(Boolean(activeSocket?.connected));
 
     // Al recibir 'diagram-state', el backend acaba de confirmar 'join-diagram' y unió al socket a la sala
     const unsubscribeDiagramState = onDiagramState(() => {
-      if (socket.connected && currentDiagramIdRef.current) {
+      if (activeSocket?.connected && currentDiagramIdRef.current) {
         attemptChatJoin();
       }
     });
 
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
+      activeSocket.off("connect", handleConnect);
+      activeSocket.off("disconnect", handleDisconnect);
       unsubscribeDiagramState();
       clearRetryTimeout();
     };
-  }, [attemptChatJoin, fetchChatHistory]);
+  }, [attemptChatJoin, fetchChatHistory, activeSocket]);
 
   // Manejo de cambio de diagrama: reiniciar mensajes, intentar chat-join y cargar historial
   useEffect(() => {
     setMessages([]);
     setError(null);
+    setBusyByMessageId({});
+    setErrorByMessageId({});
     clearRetryTimeout();
     retryCountRef.current = 0;
 
     if (diagramId) {
-      if (socket.connected) {
+      if (activeSocket?.connected) {
         attemptChatJoin();
       }
       fetchChatHistory();
@@ -253,7 +269,7 @@ export const useTeamChat = ({
     return () => {
       clearRetryTimeout();
     };
-  }, [diagramId, attemptChatJoin, fetchChatHistory]);
+  }, [diagramId, attemptChatJoin, fetchChatHistory, activeSocket]);
 
   // Escuchar mensajes entrantes en tiempo real mediante el evento 'chat-message'
   useEffect(() => {
@@ -276,12 +292,12 @@ export const useTeamChat = ({
       }
     };
 
-    socket.on("chat-message", handleIncomingMessage);
+    activeSocket.on("chat-message", handleIncomingMessage);
 
     return () => {
-      socket.off("chat-message", handleIncomingMessage);
+      activeSocket.off("chat-message", handleIncomingMessage);
     };
-  }, []);
+  }, [activeSocket]);
 
   // Escuchar el evento 'ai-operations' para aplicar modificaciones de Codia al lienzo (CU20)
   useEffect(() => {
@@ -422,7 +438,7 @@ export const useTeamChat = ({
       setError(null);
 
       return new Promise<boolean>((resolve) => {
-        socket.emit(
+        activeSocket.emit(
           "chat-message",
           { diagramId: activeDiagId, text: trimmedText },
           (res: { ok: boolean; error?: string }) => {
@@ -463,7 +479,149 @@ export const useTeamChat = ({
         );
       });
     },
-    [attemptChatJoin]
+    [attemptChatJoin, activeSocket]
+  );
+
+  // Escuchar el evento 'proposal-updated' para sincronizar propuestas en tiempo real (CU22)
+  useEffect(() => {
+    const handleProposalUpdated = (payload: any) => {
+      if (
+        !payload ||
+        !payload.diagramId ||
+        payload.diagramId !== currentDiagramIdRef.current ||
+        !payload.messageId ||
+        !payload.proposal
+      ) {
+        return;
+      }
+
+      const targetId = payload.messageId;
+
+      setMessages((prev) => {
+        let found = false;
+        const updated = prev.map((m) => {
+          if (m.id === targetId) {
+            found = true;
+            return { ...m, proposal: payload.proposal };
+          }
+          return m;
+        });
+        return found ? updated : prev;
+      });
+
+      setBusyByMessageId((prev) => {
+        if (!prev[targetId]) return prev;
+        return { ...prev, [targetId]: false };
+      });
+
+      setErrorByMessageId((prev) => {
+        if (!prev[targetId]) return prev;
+        return { ...prev, [targetId]: null };
+      });
+    };
+
+    activeSocket.on("proposal-updated", handleProposalUpdated);
+
+    return () => {
+      activeSocket.off("proposal-updated", handleProposalUpdated);
+    };
+  }, [activeSocket]);
+
+  /**
+   * Envía la decisión de aprobación o rechazo de una propuesta mediante el evento 'proposal-decision'.
+   * Mientras espera, marca el mensaje como ocupado (busy) y gestiona acuse, errores y actualización de estado.
+   */
+  const decideProposal = useCallback(
+    async (
+      messageId: string,
+      decision: "approve" | "reject"
+    ): Promise<void> => {
+      const activeDiagId = currentDiagramIdRef.current;
+      if (!activeDiagId || !messageId) {
+        return;
+      }
+
+      setBusyByMessageId((prev) => ({ ...prev, [messageId]: true }));
+      setErrorByMessageId((prev) => ({ ...prev, [messageId]: null }));
+
+      const timeoutMs = 20000;
+      let timer: NodeJS.Timeout | null = null;
+      let finished = false;
+
+      return new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          if (!finished) {
+            finished = true;
+            setBusyByMessageId((prev) => ({ ...prev, [messageId]: false }));
+            setErrorByMessageId((prev) => ({
+              ...prev,
+              [messageId]: "No se pudo aplicar, intenta de nuevo",
+            }));
+            resolve();
+          }
+        }, timeoutMs);
+
+        activeSocket.emit(
+          "proposal-decision",
+          { diagramId: activeDiagId, proposalId: messageId, decision },
+          (res: { ok: boolean; error?: string; proposal?: any }) => {
+            if (finished) {
+              return;
+            }
+            finished = true;
+            if (timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+
+            setBusyByMessageId((prev) => ({ ...prev, [messageId]: false }));
+
+            if (res?.proposal) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === messageId ? { ...m, proposal: res.proposal } : m
+                )
+              );
+            }
+
+            if (res?.ok) {
+              setErrorByMessageId((prev) => ({ ...prev, [messageId]: null }));
+            } else {
+              const errorCode = res?.error || "error";
+              let errorMsg = "No se pudo procesar la propuesta";
+              switch (errorCode) {
+                case "already_decided":
+                  errorMsg = "Otro integrante ya decidió";
+                  break;
+                case "stale":
+                  errorMsg = "El diagrama cambió, la propuesta caducó";
+                  break;
+                case "apply_failed":
+                  errorMsg = "No se pudo aplicar, intenta de nuevo";
+                  break;
+                case "not_joined":
+                  errorMsg = "No estás unido a la sala";
+                  break;
+                case "invalid_session":
+                  errorMsg = "Sesión inválida";
+                  window.dispatchEvent(new CustomEvent("session-invalid"));
+                  break;
+                case "storage_error":
+                  errorMsg = "Error al guardar, intenta de nuevo";
+                  break;
+                default:
+                  errorMsg = "No se pudo procesar la propuesta";
+                  break;
+              }
+              setErrorByMessageId((prev) => ({ ...prev, [messageId]: errorMsg }));
+            }
+
+            resolve();
+          }
+        );
+      });
+    },
+    [activeSocket]
   );
 
   const toggleOpen = useCallback(() => {
@@ -499,5 +657,9 @@ export const useTeamChat = ({
     closeChat,
     clearError,
     diagramId,
+    // CU22:
+    busyByMessageId,
+    errorByMessageId,
+    decideProposal,
   };
 };

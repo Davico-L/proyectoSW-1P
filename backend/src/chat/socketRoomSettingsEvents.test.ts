@@ -354,5 +354,70 @@ describe("CU23 - Eventos Socket.IO de Configuración de Codia (chat-join y ai-se
       both,
       "Marcos cambió el modo de Codia a 'Solo asesora'. Marcos cambió el estilo de Codia a 'Directa'"
     );
+
+    const approvalMode = formatSettingsAnnouncement("Elena", true, "approval", false, "mentora");
+    assert.equal(approvalMode, "Elena cambió el modo de Codia a 'Pide aprobación'");
+  });
+
+  test("8. ai-settings-update acepta modo 'approval' y emite anuncio con 'Pide aprobación'", async () => {
+    const diagId = `diag-settings-${Date.now()}-8`;
+    testDiagramIds.push(diagId);
+
+    const socket = connectSocket("sock-client-approval");
+    socket.join(diagId);
+
+    await new Promise<void>((resolve) => {
+      socket.emit(
+        "chat-join",
+        { diagramId: diagId, sessionId: testSessionId },
+        () => resolve()
+      );
+    });
+
+    let receivedChangedEvent: any = null;
+    let receivedSystemMessage: any = null;
+
+    const originalTo = io.to;
+    io.to = (room: string) => {
+      return {
+        emit: (event: string, data: any) => {
+          if (event === "ai-settings-changed") {
+            receivedChangedEvent = data;
+          }
+          if (event === "chat-message" && data?.role === "system") {
+            receivedSystemMessage = data;
+          }
+        },
+      };
+    };
+
+    try {
+      await new Promise<void>((resolve) => {
+        socket.emit(
+          "ai-settings-update",
+          { diagramId: diagId, mode: "approval", style: "mentora" },
+          (res: any) => {
+            assert.equal(res.ok, true);
+            assert.deepEqual(res.settings, {
+              mode: "approval",
+              style: "mentora",
+            });
+            resolve();
+          }
+        );
+      });
+
+      assert.ok(receivedChangedEvent, "Debió emitirse ai-settings-changed");
+      assert.equal(receivedChangedEvent.mode, "approval");
+      assert.equal(receivedChangedEvent.diagramId, diagId);
+
+      assert.ok(receivedSystemMessage, "Debió emitirse mensaje de sistema");
+      assert.match(
+        receivedSystemMessage.text,
+        new RegExp(`${testUsername} cambió el modo de Codia a 'Pide aprobación'`)
+      );
+    } finally {
+      io.to = originalTo;
+    }
   });
 });

@@ -4,7 +4,7 @@ import { socket as globalSocket } from "../../excalidraw-app/data/realtimeSync";
 import { ACTIVE_SESSION_KEY } from "../../excalidraw-app/data/backendSync";
 import "./TeamChat.scss";
 
-export type RoomMode = "apply" | "advise";
+export type RoomMode = "apply" | "advise" | "approval";
 export type RoomStyle = "directa" | "mentora" | "detallada";
 
 export interface RoomSettings {
@@ -61,7 +61,11 @@ export const TeamRoomSettingsSelector: React.FC<TeamRoomSettingsSelectorProps> =
       { diagramId, sessionId },
       (res: { ok: boolean; settings?: { mode?: RoomMode; style?: RoomStyle } }) => {
         if (res?.ok && res.settings) {
-          if (res.settings.mode === "apply" || res.settings.mode === "advise") {
+          if (
+            res.settings.mode === "apply" ||
+            res.settings.mode === "advise" ||
+            res.settings.mode === "approval"
+          ) {
             setMode(res.settings.mode);
           }
           if (
@@ -87,7 +91,11 @@ export const TeamRoomSettingsSelector: React.FC<TeamRoomSettingsSelectorProps> =
       if (!data || data.diagramId !== diagramId) {
         return;
       }
-      if (data.mode === "apply" || data.mode === "advise") {
+      if (
+        data.mode === "apply" ||
+        data.mode === "advise" ||
+        data.mode === "approval"
+      ) {
         setMode(data.mode);
       }
       if (
@@ -426,6 +434,34 @@ export const TeamRoomSettingsSelector: React.FC<TeamRoomSettingsSelectorProps> =
                     </span>
                     <span className="team-room-settings-option-sub">
                       Propone sin aplicar
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  className={`team-room-settings-option ${
+                    mode === "approval" ? "is-selected" : ""
+                  }`}
+                  onClick={() => handleModeSelect("approval")}
+                  disabled={isUpdating}
+                  role="radio"
+                  aria-checked={mode === "approval"}
+                  title="Pide aprobación"
+                >
+                  <div className="team-room-settings-option-indicator">
+                    <span
+                      className={`team-room-settings-radio ${
+                        mode === "approval" ? "is-checked" : ""
+                      }`}
+                    />
+                  </div>
+                  <div className="team-room-settings-option-content">
+                    <span className="team-room-settings-option-label">
+                      Pide aprobación
+                    </span>
+                    <span className="team-room-settings-option-sub">
+                      Codia propone los cambios y el equipo los aprueba o rechaza
                     </span>
                   </div>
                 </button>

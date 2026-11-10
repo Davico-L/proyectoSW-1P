@@ -1,6 +1,7 @@
 import { Collection, ObjectId } from "mongodb";
 import { getMongoDb } from "../db/mongo";
 import { parseMention } from "./aiChatHelpers";
+import { toPublicProposal, PublicProposal } from "./proposalHelpers";
 
 export const CHAT_COLLECTION_NAME = "chat_messages";
 export const DEFAULT_MESSAGE_LIMIT = 50;
@@ -69,10 +70,29 @@ export interface PublicChatMessage {
   kind?: string;
 }
 
+export const toChatMessageDocument = (doc: any): ChatMessageDocument => ({
+  id: String(doc._id || doc.id),
+  diagramId: doc.diagramId,
+  authorSessionId: doc.authorSessionId,
+  authorName: doc.authorName,
+  role: doc.role,
+  text: doc.text,
+  createdAt: doc.createdAt,
+  ...(Array.isArray(doc.mentions) ? { mentions: doc.mentions } : {}),
+  ...(doc.proposal !== undefined ? { proposal: doc.proposal } : {}),
+  ...(typeof doc.replyTo === "string" && doc.replyTo ? { replyTo: doc.replyTo } : {}),
+  ...(typeof doc.addressedTo === "string" && doc.addressedTo ? { addressedTo: doc.addressedTo } : {}),
+  ...(typeof doc.kind === "string" && doc.kind ? { kind: doc.kind } : {}),
+  ...(Array.isArray(doc.operations) ? { operations: doc.operations } : {}),
+  ...(Array.isArray(doc.warnings) ? { warnings: doc.warnings } : {}),
+  ...(Array.isArray(doc.findings) ? { findings: doc.findings } : {}),
+});
+
 /**
  * Convierte un documento de mensaje interno a su representación pública para los clientes.
  * OMITE estrictamente authorSessionId (credencial sensible del usuario).
- * kind sí viaja en la difusión pública; operations y warnings NO se envían a los clientes.
+ * proposal se pasa por toPublicProposal; kind sí viaja en la difusión pública;
+ * operations, warnings y findings NO se envían a los clientes.
  */
 export const toPublicChatMessage = (
   doc: ChatMessageDocument | (ChatMessageDocument & { [key: string]: any })
@@ -90,8 +110,8 @@ export const toPublicChatMessage = (
     publicMsg.mentions = doc.mentions;
   }
 
-  if (doc.proposal !== undefined) {
-    publicMsg.proposal = doc.proposal;
+  if (doc.proposal !== undefined && doc.proposal !== null) {
+    publicMsg.proposal = toPublicProposal(doc.proposal);
   }
 
   if (typeof doc.replyTo === "string" && doc.replyTo.trim() !== "") {
@@ -335,29 +355,237 @@ export const listMessages = async (
     // Invertimos para retornar en orden cronológico ascendente (el más antiguo primero entre los últimos N)
     rawDocs.reverse();
 
-    return rawDocs.map((doc: any) => ({
-      id: String(doc._id),
-      diagramId: doc.diagramId,
-      authorSessionId: doc.authorSessionId,
-      authorName: doc.authorName,
-      role: doc.role,
-      text: doc.text,
-      ...(Array.isArray(doc.mentions) ? { mentions: doc.mentions } : {}),
-      ...(doc.proposal !== undefined ? { proposal: doc.proposal } : {}),
-      ...(typeof doc.replyTo === "string" && doc.replyTo ? { replyTo: doc.replyTo } : {}),
-      ...(typeof doc.addressedTo === "string" && doc.addressedTo ? { addressedTo: doc.addressedTo } : {}),
-      ...(typeof doc.kind === "string" && doc.kind ? { kind: doc.kind } : {}),
-      ...(Array.isArray(doc.operations) ? { operations: doc.operations } : {}),
-      ...(Array.isArray(doc.warnings) ? { warnings: doc.warnings } : {}),
-      ...(Array.isArray(doc.findings) ? { findings: doc.findings } : {}),
-      createdAt: doc.createdAt,
-    }));
+    return rawDocs.map(toChatMessageDocument);
   } catch (err: any) {
     if (err instanceof ChatValidationError || err instanceof ChatUnavailableError) {
       throw err;
     }
     throw new ChatUnavailableError(
       `Error al listar mensajes de chat_messages: ${err?.message || err}`
+    );
+  }
+};
+
+/**
+ * Obtiene un documento de mensaje completo por su ID y diagramId.
+ * - Devuelve el documento completo (con operations) o null si no se encuentra.
+ * - Un id inválido devuelve null sin lanzar excepción.
+ */
+export const getMessageById = async (
+  diagramId: string,
+  messageId: string
+): Promise<ChatMessageDocument | null> => {
+  const cleanDiagramId = typeof diagramId === "string" ? diagramId.trim() : "";
+  const cleanMessageId = typeof messageId === "string" ? messageId.trim() : "";
+
+  if (!cleanDiagramId || !cleanMessageId || !ObjectId.isValid(cleanMessageId)) {
+    return null;
+  }
+
+  const db = await getMongoDb();
+  if (!db) {
+    throw new ChatUnavailableError(
+      "MongoDB no está disponible. No se puede obtener el mensaje."
+    );
+  }
+
+  try {
+    const collection = db.collection<MongoChatMessageDoc>(CHAT_COLLECTION_NAME);
+    await ensureChatIndexes(collection);
+
+    const doc = await collection.findOne({
+      _id: new ObjectId(cleanMessageId),
+      diagramId: cleanDiagramId,
+    });
+
+    if (!doc) {
+      return null;
+    }
+
+    return toChatMessageDocument(doc);
+  } catch (err: any) {
+    if (err instanceof ChatUnavailableError) throw err;
+    return null;
+  }
+};
+
+export type ClaimProposalResult =
+  | { ok: true; message: ChatMessageDocument }
+  | {
+      ok: false;
+      reason: "not_found" | "already_decided";
+      proposal?: PublicProposal;
+    };
+
+/**
+ * Reclama atómicamente una propuesta pendiente para iniciar su aplicación.
+ * - Realiza un solo findOneAndUpdate con filtro: _id, diagramId y proposal.status "pending"
+ *   (también reclama "applying" si proposal.applyingAt tiene más de 60 segundos).
+ * - Pone status "applying" y applyingAt con la fecha actual.
+ * - Devuelve { ok: true, message } o { ok: false, reason: "not_found" | "already_decided", proposal: versión pública vigente }.
+ */
+export const claimProposal = async (
+  diagramId: string,
+  messageId: string,
+  decidedBy: string
+): Promise<ClaimProposalResult> => {
+  const cleanDiagramId = typeof diagramId === "string" ? diagramId.trim() : "";
+  const cleanMessageId = typeof messageId === "string" ? messageId.trim() : "";
+
+  if (!cleanDiagramId || !cleanMessageId || !ObjectId.isValid(cleanMessageId)) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  const db = await getMongoDb();
+  if (!db) {
+    throw new ChatUnavailableError(
+      "MongoDB no está disponible. No se puede reclamar la propuesta."
+    );
+  }
+
+  try {
+    const collection = db.collection<MongoChatMessageDoc>(CHAT_COLLECTION_NAME);
+    await ensureChatIndexes(collection);
+
+    const objectId = new ObjectId(cleanMessageId);
+    const now = new Date();
+    const sixtySecondsAgo = new Date(now.getTime() - 60 * 1000);
+
+    const claimFilter = {
+      _id: objectId,
+      diagramId: cleanDiagramId,
+      $or: [
+        { "proposal.status": "pending" },
+        {
+          "proposal.status": "applying",
+          "proposal.applyingAt": { $lt: sixtySecondsAgo },
+        },
+      ],
+    };
+
+    const update = {
+      $set: {
+        "proposal.status": "applying",
+        "proposal.applyingAt": now,
+      },
+    };
+
+    const updatedDoc = await collection.findOneAndUpdate(
+      claimFilter as any,
+      update as any,
+      { returnDocument: "after" }
+    );
+
+    if (updatedDoc) {
+      return {
+        ok: true,
+        message: toChatMessageDocument(updatedDoc),
+      };
+    }
+
+    // No coincidió con el filtro de reclamo: verificar si el mensaje existe
+    const existing = await collection.findOne({
+      _id: objectId,
+      diagramId: cleanDiagramId,
+    });
+
+    if (!existing || !existing.proposal) {
+      return {
+        ok: false,
+        reason: "not_found",
+      };
+    }
+
+    return {
+      ok: false,
+      reason: "already_decided",
+      proposal: toPublicProposal(existing.proposal),
+    };
+  } catch (err: any) {
+    if (err instanceof ChatUnavailableError) throw err;
+    throw new ChatUnavailableError(
+      `Error al reclamar propuesta en chat_messages: ${err?.message || err}`
+    );
+  }
+};
+
+export type ProposalOutcome = "approved" | "rejected" | "expired" | "pending";
+
+/**
+ * Liquida el resultado de una propuesta previamente reclamada ("applying").
+ * - Solo actúa si el estado actual en Mongo es "applying".
+ * - Para "approved", "rejected" o "expired": guarda decidedBy (si se suministra) y decidedAt, y quita applyingAt.
+ * - Para "pending": reasigna status a "pending" y quita applyingAt.
+ * - Devuelve el mensaje actualizado (ChatMessageDocument) o null si no coincidió.
+ */
+export const settleProposal = async (
+  diagramId: string,
+  messageId: string,
+  outcome: ProposalOutcome,
+  decidedBy?: string
+): Promise<ChatMessageDocument | null> => {
+  const cleanDiagramId = typeof diagramId === "string" ? diagramId.trim() : "";
+  const cleanMessageId = typeof messageId === "string" ? messageId.trim() : "";
+
+  if (!cleanDiagramId || !cleanMessageId || !ObjectId.isValid(cleanMessageId)) {
+    return null;
+  }
+
+  if (!["approved", "rejected", "expired", "pending"].includes(outcome)) {
+    return null;
+  }
+
+  const db = await getMongoDb();
+  if (!db) {
+    throw new ChatUnavailableError(
+      "MongoDB no está disponible. No se puede liquidar la propuesta."
+    );
+  }
+
+  try {
+    const collection = db.collection<MongoChatMessageDoc>(CHAT_COLLECTION_NAME);
+    await ensureChatIndexes(collection);
+
+    const objectId = new ObjectId(cleanMessageId);
+    const filter = {
+      _id: objectId,
+      diagramId: cleanDiagramId,
+      "proposal.status": "applying",
+    };
+
+    let update: any;
+    if (outcome === "pending") {
+      update = {
+        $set: { "proposal.status": "pending" },
+        $unset: { "proposal.applyingAt": "" },
+      };
+    } else {
+      const now = new Date();
+      update = {
+        $set: {
+          "proposal.status": outcome,
+          "proposal.decidedAt": now,
+          ...(decidedBy ? { "proposal.decidedBy": String(decidedBy).trim() } : {}),
+        },
+        $unset: { "proposal.applyingAt": "" },
+      };
+    }
+
+    const updatedDoc = await collection.findOneAndUpdate(
+      filter as any,
+      update as any,
+      { returnDocument: "after" }
+    );
+
+    if (!updatedDoc) {
+      return null;
+    }
+
+    return toChatMessageDocument(updatedDoc);
+  } catch (err: any) {
+    if (err instanceof ChatUnavailableError) throw err;
+    throw new ChatUnavailableError(
+      `Error al liquidar propuesta en chat_messages: ${err?.message || err}`
     );
   }
 };

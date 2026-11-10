@@ -2,6 +2,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import http from "http";
+import { ObjectId } from "mongodb";
 import { initSocket } from "../socket";
 import { pool } from "../db";
 import { getMongoDb, closeMongoConnection } from "../db/mongo";
@@ -18,6 +19,7 @@ describe("Socket.IO Eventos de Chat (chat-join y chat-message)", () => {
   const createMockSocket = (id: string) => {
     const emitter = new EventEmitter() as any;
     emitter.id = id;
+    emitter.connected = true;
     emitter.rooms = new Set<string>([id]);
     emitter.data = {};
     emitter.join = (room: string) => {
@@ -26,12 +28,21 @@ describe("Socket.IO Eventos de Chat (chat-join y chat-message)", () => {
     emitter.leave = (room: string) => {
       emitter.rooms.delete(room);
     };
+    emitter.timeout = (_ms: number) => ({
+      emitWithAck: async (event: string, payload: any) => {
+        emitter.emit(event, payload);
+        if (typeof emitter._onEmitWithAck === "function") {
+          return await emitter._onEmitWithAck(event, payload);
+        }
+        return { applied: 1, failed: 0 };
+      },
+    });
     return emitter;
   };
 
-  const connectSocket = (id: string) => {
+  const connectSocket = (id: string, targetIo = io) => {
     const socket = createMockSocket(id);
-    const handler = io.of("/").listeners("connection")[0];
+    const handler = targetIo.of("/").listeners("connection")[0];
     handler(socket);
     return socket;
   };
@@ -362,5 +373,171 @@ describe("Socket.IO Eventos de Chat (chat-join y chat-message)", () => {
         }
       );
     });
+  });
+
+  test("10. CU22: en modo approval, un pedido de modificación guarda mensaje con proposal pendiente y operations en Mongo, la sala recibe el mensaje sin operations y no se emite ai-operations", async () => {
+    const customServer = http.createServer();
+    const mockAiChatService = {
+      answerInRoom: async (params: any) => {
+        return {
+          kind: "proposal" as const,
+          message: `${params.askerName}, propongo: agregar la clase Factura. Queda pendiente de aprobación del equipo.`,
+          operations: [{ action: "createClass", className: "Factura" }],
+          proposal: {
+            id: "prop-approval-test-1",
+            status: "pending" as const,
+            summary: ["agregar la clase Factura"],
+            requestedBy: params.askerName,
+          },
+        };
+      },
+    };
+    const customIo = initSocket(customServer, mockAiChatService as any);
+
+    try {
+      const socket = connectSocket("sock-approval-10", customIo);
+      const diagId = `diag-approval-${Date.now()}`;
+      testDiagramIds.push(diagId);
+      socket.join(diagId);
+
+      await new Promise<void>((resolve) => {
+        socket.emit("chat-join", { diagramId: diagId, sessionId: testSessionId }, () => resolve());
+      });
+
+      let aiOperationsEmitted = false;
+      socket.on("ai-operations", () => {
+        aiOperationsEmitted = true;
+      });
+
+      let aiBroadcastPayload: any = null;
+      const aiMessageReceived = new Promise<void>((resolve) => {
+        (customIo as any).to = (room: string) => ({
+          emit: (event: string, payload: any) => {
+            if (room === diagId && event === "chat-message" && payload.role === "ai") {
+              aiBroadcastPayload = payload;
+              resolve();
+            }
+          },
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        socket.emit(
+          "chat-message",
+          { diagramId: diagId, text: "@Codia agrega la clase Factura" },
+          (res: any) => {
+            assert.equal(res.ok, true);
+            resolve();
+          }
+        );
+      });
+
+      await aiMessageReceived;
+
+      // 1. No debe emitirse ai-operations al socket
+      assert.equal(aiOperationsEmitted, false, "En modo approval NO debe emitirse ai-operations al socket");
+
+      // 2. Broadcast de sala recibe kind: proposal, sin operations, con proposal pendiente
+      assert.ok(aiBroadcastPayload, "La sala debe recibir el broadcast de Codia");
+      assert.equal(aiBroadcastPayload.kind, "proposal");
+      assert.equal(aiBroadcastPayload.operations, undefined, "operations no debe exponerse en el broadcast");
+      assert.ok(!("operations" in aiBroadcastPayload));
+      assert.ok(aiBroadcastPayload.proposal, "Debe incluir el objeto proposal público");
+      assert.equal(aiBroadcastPayload.proposal.status, "pending");
+      assert.deepEqual(aiBroadcastPayload.proposal.summary, ["agregar la clase Factura"]);
+
+      // 3. En MongoDB se persisten proposal y operations
+      const db = await getMongoDb();
+      assert.ok(db, "MongoDB debe estar conectado");
+      const docInMongo = await db.collection(CHAT_COLLECTION_NAME).findOne({
+        diagramId: diagId,
+        role: "ai",
+      });
+      assert.ok(docInMongo, "El mensaje de Codia debe estar en la BD Mongo");
+      assert.equal(docInMongo.kind, "proposal");
+      assert.equal(docInMongo.proposal?.status, "pending");
+      assert.deepEqual(docInMongo.proposal?.summary, ["agregar la clase Factura"]);
+      assert.deepEqual(docInMongo.operations, [{ action: "createClass", className: "Factura" }]);
+    } finally {
+      await new Promise<void>((resolve) => customIo.close(() => resolve()));
+      customServer.close();
+    }
+  });
+
+  test("11. En modo apply, un pedido de modificación sigue emitiendo ai-operations al socket", async () => {
+    let receivedAiOperationsPayload: any = null;
+    const customServer = http.createServer();
+    const mockAiChatService = {
+      answerInRoom: async (params: any) => {
+        const ops = [{ action: "createClass", className: "Factura" }];
+        await params.onOperations(ops, []);
+        return {
+          kind: "modification" as const,
+          message: `${params.askerName}, apliqué los cambios al diagrama.`,
+          operations: ops,
+        };
+      },
+    };
+    const customIo = initSocket(customServer, mockAiChatService as any);
+
+    try {
+      const socket = connectSocket("sock-apply-11", customIo);
+      const diagId = `diag-apply-${Date.now()}`;
+      testDiagramIds.push(diagId);
+      socket.join(diagId);
+
+      socket._onEmitWithAck = async (event: string, payload: any) => {
+        if (event === "ai-operations") {
+          receivedAiOperationsPayload = payload;
+          return { applied: 1, failed: 0 };
+        }
+        return null;
+      };
+
+      await new Promise<void>((resolve) => {
+        socket.emit("chat-join", { diagramId: diagId, sessionId: testSessionId }, () => resolve());
+      });
+
+      let aiBroadcastPayload: any = null;
+      const aiMessageReceived = new Promise<void>((resolve) => {
+        (customIo as any).to = (room: string) => ({
+          emit: (event: string, payload: any) => {
+            if (room === diagId && event === "chat-message" && payload.role === "ai") {
+              aiBroadcastPayload = payload;
+              resolve();
+            }
+          },
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        socket.emit(
+          "chat-message",
+          { diagramId: diagId, text: "@Codia agrega la clase Factura" },
+          (res: any) => {
+            assert.equal(res.ok, true);
+            resolve();
+          }
+        );
+      });
+
+      await aiMessageReceived;
+
+      // 1. Debe haberse emitido ai-operations con ack al socket del autor
+      assert.ok(receivedAiOperationsPayload, "En modo apply SÍ debe emitirse ai-operations al socket");
+      assert.equal(receivedAiOperationsPayload.diagramId, diagId);
+      assert.deepEqual(receivedAiOperationsPayload.operations, [
+        { action: "createClass", className: "Factura" },
+      ]);
+
+      // 2. Broadcast de sala recibe kind: modification, sin operations
+      assert.ok(aiBroadcastPayload, "La sala debe recibir el broadcast de Codia");
+      assert.equal(aiBroadcastPayload.kind, "modification");
+      assert.equal(aiBroadcastPayload.operations, undefined, "operations no debe viajar en el broadcast");
+      assert.equal(aiBroadcastPayload.proposal, undefined, "No debe haber proposal en modo apply");
+    } finally {
+      await new Promise<void>((resolve) => customIo.close(() => resolve()));
+      customServer.close();
+    }
   });
 });

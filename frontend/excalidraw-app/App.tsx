@@ -2879,6 +2879,9 @@ const ExcalidrawWrapper = ({
           onClearError={teamChat.clearError}
           diagramId={teamChat.diagramId}
           excalidrawAPI={excalidrawAPI}
+          busyByMessageId={teamChat.busyByMessageId}
+          errorByMessageId={teamChat.errorByMessageId}
+          decideProposal={teamChat.decideProposal}
         />
       )}
 

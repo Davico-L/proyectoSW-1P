@@ -700,7 +700,7 @@ export function spanishConjunction(word: string): string {
 /**
  * Describe una operación individual de forma concisa en español.
  */
-function describeOperation(op: any): string | null {
+export function describeOperation(op: any): string | null {
   if (!op || typeof op !== "object" || !op.action) {
     return null;
   }

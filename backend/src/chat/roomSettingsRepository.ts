@@ -3,10 +3,14 @@ import { getMongoDb } from "../db/mongo";
 
 export const ROOM_SETTINGS_COLLECTION_NAME = "ai_room_settings";
 
-export type RoomMode = "apply" | "advise";
+export type RoomMode = "apply" | "advise" | "approval";
 export type RoomStyle = "directa" | "mentora" | "detallada";
 
-export const VALID_ROOM_MODES: readonly RoomMode[] = ["apply", "advise"] as const;
+export const VALID_ROOM_MODES: readonly RoomMode[] = [
+  "apply",
+  "advise",
+  "approval",
+] as const;
 export const VALID_ROOM_STYLES: readonly RoomStyle[] = [
   "directa",
   "mentora",
@@ -38,6 +42,7 @@ export function isValidStyle(val: any): val is RoomStyle {
 export const MODE_LABELS: Record<RoomMode, string> = {
   apply: "Aplica los cambios",
   advise: "Solo asesora",
+  approval: "Pide aprobación",
 };
 
 export const STYLE_LABELS: Record<RoomStyle, string> = {
