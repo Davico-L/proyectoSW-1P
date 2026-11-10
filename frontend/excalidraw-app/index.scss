@@ -138,26 +138,6 @@
   }
 }
 
-.generate-backend-button {
-  font-family: var(--ui-font);
-  transition: all 0.15s ease-in-out;
-
-  &:hover:not(:disabled) {
-    background-color: var(--color-primary-darker, #1d4ed8) !important;
-    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
-  }
-
-  &:active:not(:disabled) {
-    background-color: var(--color-primary-darkest, #1e40af) !important;
-    transform: translateY(1px);
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-}
-
 .session-user-badge {
   font-family: var(--ui-font);
   border: 1px solid var(--default-border-color, #cbd5e1) !important;
