@@ -66,7 +66,7 @@ import {
 import { getContainingFrame } from "./frame";
 import { getCornerRadius } from "./utils";
 
-import { ShapeCache } from "./shape";
+import { ShapeCache, generateRoughOptions } from "./shape";
 
 import type {
   ExcalidrawElement,
@@ -251,7 +251,7 @@ const generateElementCanvas = (
 
   const rc = rough.canvas(canvas);
 
-  drawElementOnCanvas(element, rc, context, renderConfig);
+  drawElementOnCanvas(element, rc, context, renderConfig, elementsMap);
 
   context.restore();
 
@@ -320,6 +320,7 @@ const drawElementOnCanvas = (
   rc: RoughCanvas,
   context: CanvasRenderingContext2D,
   renderConfig: StaticCanvasRenderConfig,
+  elementsMap?: RenderableElementsMap | NonDeletedSceneElementsMap,
 ) => {
   switch (element.type) {
     case "rectangle":
@@ -331,6 +332,49 @@ const drawElementOnCanvas = (
       context.lineCap = "round";
 
       rc.draw(ShapeCache.generateElementShape(element, renderConfig));
+
+      if (
+        element.type === "rectangle" &&
+        element.customData?.type === "umlClass" &&
+        elementsMap
+      ) {
+        const boundTextElement = getBoundTextElement(element, elementsMap);
+        if (boundTextElement) {
+          const lines = boundTextElement.text.split("\n");
+          const lineHeightPx = getLineHeightInPx(
+            boundTextElement.fontSize,
+            boundTextElement.lineHeight,
+          );
+          const textOffsetY = boundTextElement.y - element.y;
+          const isDarkMode = renderConfig.theme === THEME.DARK;
+
+          lines.forEach((line, lineIndex) => {
+            if (line === "") {
+              const lineY = textOffsetY + (lineIndex + 0.5) * lineHeightPx;
+              if (element.roughness > 0) {
+                const options = generateRoughOptions(
+                  element,
+                  false,
+                  isDarkMode,
+                );
+                rc.line(0, lineY, element.width, lineY, options);
+              } else {
+                context.save();
+                context.strokeStyle = applyDarkModeFilter(
+                  element.strokeColor,
+                  isDarkMode,
+                );
+                context.lineWidth = element.strokeWidth;
+                context.beginPath();
+                context.moveTo(0, lineY);
+                context.lineTo(element.width, lineY);
+                context.stroke();
+                context.restore();
+              }
+            }
+          });
+        }
+      }
       break;
     }
     case "arrow":
@@ -792,7 +836,7 @@ export const renderElement = (
         context.translate(cx, cy);
         context.rotate(element.angle);
         context.translate(-shiftX, -shiftY);
-        drawElementOnCanvas(element, rc, context, renderConfig);
+        drawElementOnCanvas(element, rc, context, renderConfig, elementsMap);
         context.restore();
       } else {
         const elementWithCanvas = generateElementWithCanvas(
@@ -890,7 +934,7 @@ export const renderElement = (
           context.clip("evenodd");
           context.rotate(element.angle);
           context.translate(-shiftX, -shiftY);
-          drawElementOnCanvas(element, rc, context, renderConfig);
+          drawElementOnCanvas(element, rc, context, renderConfig, elementsMap);
           context.restore();
         } else {
           context.rotate(element.angle);
@@ -901,7 +945,7 @@ export const renderElement = (
           }
 
           context.translate(-shiftX, -shiftY);
-          drawElementOnCanvas(element, rc, context, renderConfig);
+          drawElementOnCanvas(element, rc, context, renderConfig, elementsMap);
         }
 
         context.restore();

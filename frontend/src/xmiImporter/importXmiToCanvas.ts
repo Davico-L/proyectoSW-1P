@@ -7,6 +7,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { parseXmi, ParseXmiStats } from "./parseXmi";
 import { computeGridLayout, ClassSize } from "./gridLayout";
 import { createUmlClassElement } from "../uml/createUmlClassElement";
+import { computeUmlClassHeight } from "../uml/computeUmlClassHeight";
 import { createUmlRelationElement } from "../uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../uml/updateUmlRelationElement";
 import { buildUmlClassLabel, UmlClassData, RelationType } from "../uml/types";
@@ -42,10 +43,11 @@ export function computeClassDimensions(data: UmlClassData): {
   const labelText = buildUmlClassLabel(data);
   const lines = labelText.split("\n");
   const lineCount = lines.length;
-  const maxLineLength = Math.max(...lines.map((l) => l.length), 10);
+  const contentLines = lines.filter((l) => l.trim().length > 0);
+  const maxLineLength = Math.max(...contentLines.map((l) => l.length), 10);
 
   const width = Math.max(220, maxLineLength * 9 + 40);
-  const height = Math.max(140, lineCount * 22 + 40);
+  const height = computeUmlClassHeight(lineCount);
 
   return { width, height };
 }

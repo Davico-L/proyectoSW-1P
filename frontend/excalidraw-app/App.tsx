@@ -151,6 +151,7 @@ import { createUmlClassElement } from "../src/uml/createUmlClassElement";
 import { updateUmlClassElement } from "../src/uml/updateUmlClassElement";
 import { createUmlRelationElement } from "../src/uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../src/uml/updateUmlRelationElement";
+import { normalizeUmlClassCorners } from "../src/uml/normalizeUmlClassCorners";
 import { AiChatButton } from "../src/aiEdit/AiChatButton";
 import { AiChatPanel } from "../src/aiEdit/AiChatPanel";
 import {
@@ -301,10 +302,12 @@ const initializeScene = async (opts: {
   > & {
     scrollToContent?: boolean;
   } = {
-    elements: restoreElements(initialDataState?.elements, null, {
-      repairBindings: true,
-      deleteInvisibleElements: true,
-    }),
+    elements: normalizeUmlClassCorners(
+      restoreElements(initialDataState?.elements, null, {
+        repairBindings: true,
+        deleteInvisibleElements: true,
+      }),
+    ),
     appState: restoreAppState(initialDataState?.appState, null),
   };
 
@@ -326,12 +329,14 @@ const initializeScene = async (opts: {
         );
 
         scene = {
-          elements: bumpElementVersions(
-            restoreElements(imported.elements, null, {
-              repairBindings: true,
-              deleteInvisibleElements: true,
-            }),
-            localDataState?.elements,
+          elements: normalizeUmlClassCorners(
+            bumpElementVersions(
+              restoreElements(imported.elements, null, {
+                repairBindings: true,
+                deleteInvisibleElements: true,
+              }),
+              localDataState?.elements,
+            ),
           ),
           appState: restoreAppState(
             imported.appState,
@@ -410,10 +415,12 @@ const initializeScene = async (opts: {
           // go through App.initializeScene() that resets this flag
           isLoading: false,
         },
-        elements: reconcileElements(
-          scene?.elements || [],
-          excalidrawAPI.getSceneElementsIncludingDeleted() as RemoteExcalidrawElement[],
-          excalidrawAPI.getAppState(),
+        elements: normalizeUmlClassCorners(
+          reconcileElements(
+            scene?.elements || [],
+            excalidrawAPI.getSceneElementsIncludingDeleted() as RemoteExcalidrawElement[],
+            excalidrawAPI.getAppState(),
+          ),
         ),
       },
       isExternalScene: true,
@@ -1235,13 +1242,14 @@ const ExcalidrawWrapper = ({
 
       isApplyingRemoteChange.current = true;
       try {
+        const normalizedElements = normalizeUmlClassCorners(elements);
         const reconciledElements = reconcileElements(
           excalidrawAPI.getSceneElementsIncludingDeleted(),
-          elements as readonly RemoteExcalidrawElement[],
+          normalizedElements as unknown as readonly RemoteExcalidrawElement[],
           excalidrawAPI.getAppState(),
         );
         excalidrawAPI.updateScene({
-          elements: reconciledElements,
+          elements: normalizeUmlClassCorners(reconciledElements),
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       } catch (err) {
@@ -1451,9 +1459,11 @@ const ExcalidrawWrapper = ({
           loadImages(data);
           if (data.scene) {
             excalidrawAPI.updateScene({
-              elements: restoreElements(data.scene.elements, null, {
-                repairBindings: true,
-              }),
+              elements: normalizeUmlClassCorners(
+                restoreElements(data.scene.elements, null, {
+                  repairBindings: true,
+                }),
+              ),
               appState: restoreAppState(data.scene.appState, null),
               captureUpdate: CaptureUpdateAction.IMMEDIATELY,
             });

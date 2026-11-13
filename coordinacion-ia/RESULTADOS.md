@@ -1897,6 +1897,103 @@ Este documento recopila los resultados, entregables verificados y métricas de a
 - **Notas y Observaciones**:
   - La integración en el panel respeta la arquitectura de temas claro y oscuro, y mantiene totalmente desacoplada la lógica de decisiones a través del hook `useTeamChat`.
 
+### [RES-118] Esquinas cuadradas para clases UML y normalización en carga/colaboración
+- **Fecha**: 2026-11-11
+- **Tarea Asociada**: TSK-118
+- **Entregables Producidos**:
+  - `frontend/src/uml/createUmlClassElement.ts`:
+    - Cambiado el valor de `roundness: { type: 3 }` por `roundness: null`, asegurando que toda nueva clase UML (creada desde el modal, importación XMI u operaciones IA) tenga esquinas cuadradas.
+  - `frontend/src/uml/updateUmlClassElement.ts`:
+    - Incorporado explícitamente `roundness: null` en `newElementWith(...)` del contenedor para garantizar esquinas cuadradas tras cualquier edición.
+  - `frontend/src/uml/normalizeUmlClassCorners.ts`:
+    - Función pura `normalizeUmlClassCorners` que clona con `newElementWith(el, { roundness: null })` (incrementando `version` y `versionNonce`) los elementos con `customData?.type === "umlClass"` y `roundness !== null`, manteniendo las referencias originales para elementos intactos o no UML.
+  - `frontend/src/tests/normalizeUmlClassCorners.test.ts`:
+    - Pruebas unitarias en Vitest verificando normalización a `null`, incremento de versión y preservación de referencias.
+  - `frontend/excalidraw-app/App.tsx`:
+    - Aplicada la normalización en `initializeScene` (carga inicial y cambio de diagrama desde "Mis diagramas"), en `onHashChange` y en `applyRemoteChange` (Socket.IO `diagram-state` y `diagram-update`).
+- **Verificación Realizada**:
+  - `yarn test:typecheck` (`tsc`): 0 errores en 88.82s.
+  - `yarn vitest run src/tests/`: 22/22 pruebas unitarias pasando (3 suites: `shareDiagram`, `normalizeUmlClassCorners`, `applyAiOperationsUpdateClass`).
+- **Notas y Observaciones**:
+  - Se mantuvo intacto el panel de bordes de Excalidraw sin acoplamientos innecesarios.
+  - No se afectaron las relaciones ni los textos vinculados.
+
+### [RES-119] Separadores dinámicos de compartimentos en clases UML (Opción A)
+- **Fecha**: 2026-11-11
+- **Tarea Asociada**: TSK-119
+- **Entregables Producidos**:
+  - `frontend/src/uml/types.ts`:
+    - `buildUmlClassLabel(data, separator)` ahora acepta un separador opcional (`separator: string = DEFAULT_UML_SEPARATOR`), preservando total retrocompatibilidad con llamadores existentes.
+  - `frontend/src/uml/computeUmlSeparator.ts`:
+    - Función pura `computeUmlSeparator(containerWidth, fontSize)` que obtiene `BOUND_TEXT_PADDING` de `@excalidraw/common`, mide el ancho de `"─"` mediante `measureText` y `getFontString`, calcula `N = Math.floor(availableWidth / charWidth) - 1` (con mínimo de 14) y verifica que el separador medido no exceda el ancho disponible.
+  - `frontend/src/uml/createUmlClassElement.ts`:
+    - `maxLineLength` se calcula exclusivamente sobre las líneas de contenido (`!l.startsWith("─")`), evitando dependencias circulares.
+    - Se calcula el separador dinámico con el ancho final del contenedor y se pasa a `buildUmlClassLabel`.
+  - `frontend/src/uml/updateUmlClassElement.ts`:
+    - Al editar una clase, se calcula `maxLineLength` sin separadores, se determina `nextWidth` y se regenera el texto con el separador dinámico mediante `computeUmlSeparator(nextWidth)`.
+  - `frontend/src/tests/computeUmlSeparator.test.ts`:
+    - Pruebas unitarias que validan el ancho medido del carácter (`10px`), el cálculo de `N` para 220 px (`N=20`) y 300 px (`N=28`), y la verificación de ausencia de saltos de línea indeseados en clases cortas y largas.
+- **Verificación Realizada**:
+  - `yarn test:typecheck` (`tsc`): 0 errores en 29.74s.
+  - `yarn vitest run src/tests/`: 25/25 pruebas unitarias pasando (4 suites: `shareDiagram`, `normalizeUmlClassCorners`, `computeUmlSeparator`, `applyAiOperationsUpdateClass`).
+- **Notas y Observaciones**:
+  - Se mantuvo la arquitectura de 1 rectángulo + 1 texto vinculado sin elementos de línea nuevos ni impacto en generadores, XMI ni Socket.IO.
+
+### [RES-120] Líneas separadoras de borde a borde en clases UML (Opción C)
+- **Fecha**: 2026-11-11
+- **Tarea Asociada**: TSK-120
+- **Entregables Producidos**:
+  - `frontend/packages/element/src/renderElement.ts`:
+    - Firma de `drawElementOnCanvas` extendida para recibir `elementsMap?: RenderableElementsMap | NonDeletedSceneElementsMap`.
+    - Actualizados los 4 puntos de llamada de `drawElementOnCanvas` para propagar `elementsMap`.
+    - En el `case "rectangle"`, para `element.customData?.type === "umlClass"`, recuperación segura del texto vinculado con `getBoundTextElement(element, elementsMap)`.
+    - Detección de renglones separadores vacíos (`""`), cálculo de altura de línea con `getLineHeightInPx` y posicionamiento vertical $y = (text.y - element.y) + (lineIndex + 0.5) \times lineHeightPx$.
+    - Trazado horizontal de borde a borde ($x=0$ a $x=element.width$) usando `rc.line(0, y, element.width, y, options)` con `generateRoughOptions` cuando `roughness > 0` (preservando el estilo boceto del rectángulo), y `context.stroke()` cuando `roughness === 0`.
+    - Soporte completo para tema oscuro mediante `applyDarkModeFilter(element.strokeColor, renderConfig.theme === THEME.DARK)` y ancho de trazo `element.strokeWidth`.
+  - `frontend/src/uml/types.ts`:
+    - `buildUmlClassLabel` emite ahora renglones vacíos `""` (`UML_SEPARATOR_PLACEHOLDER`) para los separadores entre nombre, atributos y métodos, preservando el conteo de líneas sin introducir caracteres `"─"`.
+    - Eliminados exports obsoletos de separadores de caracteres.
+  - `frontend/src/uml/createUmlClassElement.ts` & `frontend/src/uml/updateUmlClassElement.ts`:
+    - Eliminadas dependencias de `computeUmlSeparator`. Cálculo de ancho de contenedor (`maxLineLength`) ignorando líneas vacías.
+  - `frontend/src/uml/normalizeUmlClassCorners.ts`:
+    - Limpieza automática de clases heredadas que contengan caracteres `"─"` en el texto vinculado: regeneración del texto con `buildUmlClassLabel`, re-medición y reubicación, forzando la invalidación de caché del contenedor con `newElementWith(el, { roundness: null }, true)`.
+  - Eliminación de archivos temporales:
+    - Borrados `frontend/src/uml/computeUmlSeparator.ts` y `frontend/src/tests/computeUmlSeparator.test.ts`.
+- **Verificación Realizada**:
+  - `yarn test:typecheck` (`tsc`): 0 errores en 34.79s.
+  - `yarn vitest run src/tests/`: 23/23 pruebas unitarias pasando (3 suites: `shareDiagram`, `normalizeUmlClassCorners`, `applyAiOperationsUpdateClass`).
+- **Notas y Observaciones**:
+  - Se mantiene la arquitectura de 1 rectángulo + 1 texto vinculado.
+  - No se afectaron generadores, backend, XMI ni sincronización por sockets.
+
+### [RES-121] Altura proporcional y espaciado vertical homogéneo en clases UML
+- **Fecha**: 2026-11-11
+- **Tarea Asociada**: TSK-121
+- **Entregables Producidos**:
+  - `frontend/src/uml/computeUmlClassHeight.ts`:
+    - Función modular compartida `computeUmlClassHeight(lineCount, fontSize?, fontFamily?)` que calcula `(safeLineCount + 1) * lineHeightPx`.
+    - Función auxiliar `getUmlLineHeightInPx(fontSize?, fontFamily?)` que obtiene el alto de línea real (`16 * 1.15 = 18.4 px` para Liberation Sans a 16px).
+    - Garantiza simetría vertical exacta: sobrante de `0.5 * lineHeightPx` (9.2 px) arriba y `0.5 * lineHeightPx` (9.2 px) abajo, idéntico a la distancia de media línea hacia las líneas separadoras en renglones vacíos.
+  - `frontend/src/uml/createUmlClassElement.ts`:
+    - Reemplazado `Math.max(140, lineCount * 22 + 40)` por `computeUmlClassHeight(lineCount)`.
+    - Eliminado el mínimo fijo de 140px.
+  - `frontend/src/uml/updateUmlClassElement.ts`:
+    - Reemplazado `minHeight = lineCount * 22 + 40` y `Math.max(container.height, minHeight)` por `computeUmlClassHeight(lineCount, textEl.fontSize, targetFontFamily)`.
+    - El nuevo alto exacto se aplica al editar la clase en el modal.
+  - `frontend/src/xmiImporter/importXmiToCanvas.ts`:
+    - `computeClassDimensions(data)` actualizado para usar `computeUmlClassHeight(lineCount)` y `contentLines` para el ancho.
+  - `frontend/src/aiEdit/applyAiOperations.ts`:
+    - `estimateClassCardHeight` y `maxCardHeight` actualizados para usar `computeUmlClassHeight(lines.length)`.
+  - `frontend/src/tests/computeUmlClassHeight.test.ts`:
+    - Suite de 4 pruebas unitarias validando el alto de línea (18.4 px), las alturas de 3 clases de ejemplo (36.8 px, 92.0 px, 147.2 px), el centrado simétrico en `createUmlClassElement` y la verificación contra `BOUND_TEXT_PADDING` (18.4 > 10).
+- **Verificación Realizada**:
+  - `yarn test:typecheck` (`tsc`): 0 errores en 35.55s.
+  - `yarn vitest run src/tests/`: 27/27 pruebas unitarias pasando (4 suites).
+  - `yarn vitest run src/tests/ src/xmiImporter/`: 55/55 pruebas unitarias pasando (9 suites).
+- **Notas y Observaciones**:
+  - Se confirmó matemáticamente que `container.height = (lineCount + 1) * lineHeightPx` supera `text.height + 2 * BOUND_TEXT_PADDING` por 8.4 px, impidiendo auto-expansiones indeseadas de Excalidraw.
+  - Las clases previamente guardadas conservan su altura original en la base de datos sin alterarse durante la carga.
+
 
 
 

@@ -6,6 +6,68 @@ Este documento refleja en tiempo real la tarea activa que está ejecutando el as
 
 ## Tarea en Curso
 
+- **Identificador**: TSK-121
+- **Nombre**: Altura proporcional y espaciado vertical homogéneo en clases UML
+- **Fecha de Inicio**: 2026-11-11
+- **Estado**: Completada
+- **Objetivo**: Estandarizar la altura de las clases UML para que el espaciado vertical entre compartimentos y bordes sea exactamente homogéneo (borde superior → título, título → línea, línea → primer atributo, etc.):
+  (1) Identificar las fórmulas actuales de cálculo/estimación de altura en `createUmlClassElement.ts`, `updateUmlClassElement.ts`, `applyAiOperations.ts`, `importXmiToCanvas.ts` y `App.tsx`.
+  (2) Implementar función auxiliar `computeUmlClassDimensions` o `computeUmlClassHeight(lineCount, fontSize)` que calcule: `alto = (lineCount + 1) * lineHeightPx`, asegurando que el sobrante vertical sea exactamente media línea arriba y media línea abajo.
+  (3) Eliminar mínimos fijos de altura (`140px`) en creación y edición.
+  (4) Usar la función compartida en `createUmlClassElement`, `updateUmlClassElement`, `applyAiOperations`, `importXmiToCanvas` y colocación de clases en `App.tsx`.
+  (5) Validar comportamiento con `BOUND_TEXT_PADDING` y centrado vertical de Excalidraw.
+  (6) Preservar dimensiones de clases ya guardadas al cargar (no modificar su altura en normalización de carga).
+  (7) Ejecutar `yarn test:typecheck` y `yarn vitest run`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-120
+- **Nombre**: Líneas separadoras de borde a borde en el renderizado de clases UML (Opción C)
+- **Fecha de Inicio**: 2026-11-11
+- **Estado**: Completada
+- **Objetivo**: Implementar la opción C para dibujar las dos líneas separadoras de las clases UML de borde a borde en el renderizado del rectángulo:
+  (1) En `frontend/packages/element/src/renderElement.ts`: propagar `elementsMap` a `drawElementOnCanvas`. En `case "rectangle"`, si `element.customData?.type === "umlClass"`, obtener el texto vinculado con `getBoundTextElement(element, elementsMap)` con null-safety estricta, localizar renglones vacíos y calcular la coordenada local $y$ de cada línea según su índice y altura de línea real, dibujando de $x = 0$ a $x = \text{element.width}$ con estilos idénticos al rectángulo (respetando dark mode y roughness).
+  (2) En `frontend/src/uml/types.ts`: actualizar `buildUmlClassLabel` para insertar `""` en los separadores en lugar de `"─"`.
+  (3) En `createUmlClassElement.ts` y `updateUmlClassElement.ts`: desacoplar de `computeUmlSeparator`, calcular ancho ignorando renglones vacíos, y limpiar archivos y exports en desuso.
+  (4) En la normalización de carga (`normalizeUmlClassCorners` / `normalizeUmlClasses`): limpiar `"─"` de clases antiguas regenerando el texto y forzando la invalidación de caché del contenedor con `newElementWith`.
+  (5) Validar con `yarn test:typecheck` y `yarn vitest run`.
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-119
+- **Nombre**: Separadores dinámicos de compartimentos en clases UML (Opción A)
+- **Fecha de Inicio**: 2026-11-11
+- **Estado**: Completada
+- **Objetivo**: Implementar separadores de compartimentos que lleguen casi de borde a borde en clases UML (1 rectángulo + 1 texto vinculado):
+  (1) En `frontend/src/uml/types.ts`: permitir parámetro opcional `separator?: string` en `buildUmlClassLabel`, manteniendo el valor por defecto de 14 caracteres para retrocompatibilidad.
+  (2) Crear función auxiliar compartida `computeUmlSeparator(containerWidth)` que use `BOUND_TEXT_PADDING` de Excalidraw, mida el carácter `"─"` con `measureText` y `getFontString` (Liberation Sans, 16px), calcule `N = Math.floor(availableWidth / charWidth) - 1` (con mínimo 14) y asegure que no desborde.
+  (3) En `frontend/src/uml/createUmlClassElement.ts`: calcular `maxLineLength` excluyendo separadores, determinar el ancho final, calcular el separador dinámico y pasarlo a `buildUmlClassLabel`.
+  (4) En `frontend/src/uml/updateUmlClassElement.ts`: usar la misma función compartida con el ancho final para regenerar el texto con el separador dinámico.
+  (5) Validar con `yarn test:typecheck`, verificar que no existan saltos de línea indeseados en separadores y reportar métricas calculadas (ancho del carácter, valores de N para 220 px y 300 px).
+
+---
+
+## Tarea Anterior (completada)
+
+- **Identificador**: TSK-118
+- **Nombre**: Esquinas cuadradas para clases UML y normalización en carga/colaboración
+- **Fecha de Inicio**: 2026-11-11
+- **Estado**: Completada
+- **Objetivo**: Implementar esquinas cuadradas (`roundness: null`) para rectángulos de clase UML (`customData.type === "umlClass"`):
+  (1) En `frontend/src/uml/createUmlClassElement.ts`, cambiar `roundness: { type: 3 }` por `roundness: null`.
+  (2) En `frontend/src/uml/updateUmlClassElement.ts`, agregar `roundness: null` explícito en `newElementWith(...)`.
+  (3) Crear función auxiliar reutilizable `normalizeUmlClassCorners(elements)` que clone con `newElementWith(el, { roundness: null })` los elementos con `customData?.type === "umlClass"` y `roundness !== null`, dejando los demás intactos.
+  (4) Identificar y aplicar la normalización en todos los caminos de carga/recepción de elementos al lienzo (restauración inicial en `initializeScene` de `App.tsx`, cambio de diagrama desde "Mis diagramas" y colaboración en tiempo real vía Socket.IO).
+  (5) Verificar con `yarn test:typecheck` y documentar.
+
+---
+
+## Tarea Anterior (completada)
+
 - **Identificador**: TSK-117
 - **Nombre**: CU22 Fase 3C-2 - Integración de ProposalCard en TeamChatPanel.tsx y pruebas
 - **Fecha de Inicio**: 2026-11-09

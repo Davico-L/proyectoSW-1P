@@ -10,6 +10,7 @@ import type {
 } from "@excalidraw/element/types";
 import { buildUmlClassLabel } from "./types";
 import type { UmlClassData } from "./types";
+import { computeUmlClassHeight } from "./computeUmlClassHeight";
 
 /**
  * Crea un elemento contenedor (rectángulo) con datos UML y su texto vinculado.
@@ -23,15 +24,15 @@ export function createUmlClassElement(
   data: UmlClassData,
   center: { x: number; y: number },
 ): { container: ExcalidrawElement; text: ExcalidrawElement } {
+  // Calcular dimensiones basadas en la cantidad de líneas y longitud de contenido (ignorando renglones vacíos)
   const labelText = buildUmlClassLabel(data);
-
-  // Calcular dimensiones basadas en la cantidad y longitud de líneas
   const lines = labelText.split("\n");
   const lineCount = lines.length;
-  const maxLineLength = Math.max(...lines.map((l) => l.length), 10);
+  const contentLines = lines.filter((l) => l.trim().length > 0);
+  const maxLineLength = Math.max(...contentLines.map((l) => l.length), 10);
 
   const width = Math.max(220, maxLineLength * 9 + 40);
-  const height = Math.max(140, lineCount * 22 + 40);
+  const height = computeUmlClassHeight(lineCount);
 
   const x = center.x - width / 2;
   const y = center.y - height / 2;
@@ -48,7 +49,7 @@ export function createUmlClassElement(
     fillStyle: "solid",
     strokeWidth: 2,
     roughness: 1,
-    roundness: { type: 3 },
+    roundness: null,
     customData: data,
   });
 

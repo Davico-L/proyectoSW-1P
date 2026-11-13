@@ -13,6 +13,7 @@ import { CaptureUpdateAction } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { buildUmlClassLabel } from "./types";
 import type { UmlClassData } from "./types";
+import { computeUmlClassHeight } from "./computeUmlClassHeight";
 
 /**
  * Actualiza un elemento de clase UML existente y su texto vinculado en la escena.
@@ -33,20 +34,12 @@ export function updateUmlClassElement(
   const labelText = buildUmlClassLabel(newData);
   const lines = labelText.split("\n");
   const lineCount = lines.length;
-  const maxLineLength = Math.max(...lines.map((l) => l.length), 10);
+  const contentLines = lines.filter((l) => l.trim().length > 0);
+  const maxLineLength = Math.max(...contentLines.map((l) => l.length), 10);
 
   // Redimensionar el contenedor si el texto nuevo no entra
   const minWidth = maxLineLength * 9 + 40;
-  const minHeight = lineCount * 22 + 40;
   const nextWidth = Math.max(container.width, minWidth);
-  const nextHeight = Math.max(container.height, minHeight);
-
-  // 1. Actualizar contenedor con nuevas dimensiones y nuevo customData
-  const updatedContainer = newElementWith(container, {
-    width: nextWidth,
-    height: nextHeight,
-    customData: newData,
-  });
 
   const allElements = excalidrawAPI.getSceneElements();
 
@@ -86,6 +79,20 @@ export function updateUmlClassElement(
     fontString,
     textEl.lineHeight,
   );
+
+  const nextHeight = computeUmlClassHeight(
+    lineCount,
+    textEl.fontSize,
+    targetFontFamily,
+  );
+
+  // 1. Actualizar contenedor con nuevas dimensiones, nuevo customData y esquinas cuadradas
+  const updatedContainer = newElementWith(container, {
+    width: nextWidth,
+    height: nextHeight,
+    customData: newData,
+    roundness: null,
+  });
 
   // 2. Actualizar texto con el nuevo label, nueva fuente y sus dimensiones recalculadas
   const updatedText = newElementWith(textEl, {

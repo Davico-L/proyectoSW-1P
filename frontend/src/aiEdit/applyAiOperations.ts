@@ -12,6 +12,7 @@ import { CaptureUpdateAction } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { createUmlClassElement } from "../uml/createUmlClassElement";
+import { computeUmlClassHeight } from "../uml/computeUmlClassHeight";
 import { updateUmlClassElement } from "../uml/updateUmlClassElement";
 import { createUmlRelationElement } from "../uml/createUmlRelationElement";
 import { updateUmlRelationElement } from "../uml/updateUmlRelationElement";
@@ -310,13 +311,13 @@ export function applyAiOperations(
       methods: op.methods ?? [],
     };
     const lines = buildUmlClassLabel(data).split("\n");
-    return Math.max(140, lines.length * 22 + 40);
+    return computeUmlClassHeight(lines.length);
   };
 
   const maxCardHeight =
     totalCreateClasses > 0
       ? Math.max(...createClassOps.map(estimateClassCardHeight))
-      : 140;
+      : computeUmlClassHeight(1);
 
   const stepX = 250;
   const stepY = maxCardHeight + 60;

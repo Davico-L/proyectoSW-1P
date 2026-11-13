@@ -33,7 +33,7 @@ export interface UmlRelationData {
   multiplicityTarget?: Multiplicity;
 }
 
-const SEPARATOR = "──────────────";
+export const UML_SEPARATOR_PLACEHOLDER = "";
 
 const VISIBILITY_SYMBOLS: Record<"public" | "private" | "protected", string> = {
   public: "+",
@@ -52,7 +52,7 @@ export function buildUmlClassLabel(data: UmlClassData): string {
   }
 
   if (hasAttributes) {
-    parts.push(SEPARATOR);
+    parts.push(UML_SEPARATOR_PLACEHOLDER);
     for (const attr of data.attributes) {
       const symbol = VISIBILITY_SYMBOLS[attr.visibility] || "+";
       parts.push(`${symbol} ${attr.name}: ${attr.type}`);
@@ -60,7 +60,7 @@ export function buildUmlClassLabel(data: UmlClassData): string {
   }
 
   if (hasMethods) {
-    parts.push(SEPARATOR);
+    parts.push(UML_SEPARATOR_PLACEHOLDER);
     for (const method of data.methods) {
       const symbol = VISIBILITY_SYMBOLS[method.visibility] || "+";
       parts.push(`${symbol} ${method.name}(): ${method.returnType}`);
